@@ -89,6 +89,7 @@ async fn generate_content_with_tools(
 
     let request_body = json!({
         "contents": [{
+            "role":"user",
             "parts": [{"text": prompt}]
         }],
         "tools": [{
@@ -171,6 +172,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let prompt = "What's the weather like in San Francisco?";
+
+    // First turn: Get function call from LLM
+    println!("Sending initial prompt: {}", prompt);
     let response =
         generate_content_with_tools(&client, &api_key, prompt, &[weather_tool.clone()]).await?;
 
@@ -195,11 +199,112 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Args: {}", args);
 
                     // Execute the tool
-                    if let Some(result) = process_function_call(&[weather_tool], name, args) {
+                    if let Some(result) = process_function_call(&[weather_tool.clone()], name, args)
+                    {
                         println!("\nTool execution result:");
                         println!("{}", result);
 
-                        // You could send this result back to Gemini for a final response
+                        // Second turn: Send function result back to LLM
+                        println!("\nSending function result back to LLM...");
+
+                        // Create a new request body with the function response
+                        let url = format!(
+                            "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
+                            api_key
+                        );
+
+                        // Convert our Tool structs to what Gemini expects
+                        let function_declarations: Vec<FunctionDeclaration> =
+                            vec![FunctionDeclaration {
+                                name: weather_tool.name.clone(),
+                                description: weather_tool.description.clone(),
+                                parameters: weather_tool.parameters.clone(),
+                            }];
+
+                        // Create request with conversation history including function result
+                        let request_body = json!({
+                            "contents": [
+                                {
+                                    "role": "user",
+                                    "parts": [{"text": prompt}]
+                                },
+                                {
+                                    "role":"model",
+                                    "parts": [{
+                                        "functionCall": {
+                                            "name": name,
+                                            "args": args
+                                        }
+                                    }]
+                                },
+                                {
+                                    "role": "model",
+                                    "parts": [{
+                                        "functionResponse": {
+                                            "name": name,
+                                            "response": {
+                                                "name": name,
+                                                "content": result
+                                            }
+                                        }
+                                    }]
+                                }
+                            ],
+                            "tools": [{
+                                "function_declarations": function_declarations
+                            }],
+                            //"tool_config": {
+                            //    "function_calling_config": {
+                            //        "mode": "auto",
+                            //        "allowed_function_names": [weather_tool.name.clone()]
+                            //    }
+                            //}
+                        });
+
+                        // Send request with function result
+                        let final_response = client
+                            .post(&url)
+                            .header("Content-Type", "application/json")
+                            .json(&request_body)
+                            .send()
+                            .await?
+                            .json::<Value>()
+                            .await?;
+
+                        // Process the final response
+                        if let Some(candidates) =
+                            final_response.get("candidates").and_then(|c| c.as_array())
+                        {
+                            if let Some(candidate) = candidates.first() {
+                                // Check if there's another function call
+                                if let Some(function_calls) = candidate
+                                    .get("content")
+                                    .and_then(|content| content.get("parts"))
+                                    .and_then(|parts| parts.as_array())
+                                    .and_then(|parts| parts.first())
+                                    .and_then(|part| part.get("functionCall"))
+                                {
+                                    println!(
+                                        "\nAnother function call detected (could process recursively)"
+                                    );
+                                    println!("{:#?}", function_calls);
+                                }
+                                // Check for text response
+                                else if let Some(text) = candidate
+                                    .get("content")
+                                    .and_then(|content| content.get("parts"))
+                                    .and_then(|parts| parts.as_array())
+                                    .and_then(|parts| parts.first())
+                                    .and_then(|part| part.get("text"))
+                                    .and_then(|text| text.as_str())
+                                {
+                                    println!("\nFinal AI Response:");
+                                    println!("{}", text);
+                                }
+                            }
+                        } else {
+                            println!("Failed to parse final response:\n{:#?}", final_response);
+                        }
                     }
                 }
             } else if let Some(text) = candidate
@@ -210,11 +315,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .and_then(|part| part.get("text"))
                 .and_then(|text| text.as_str())
             {
-                println!("AI Response:\n{}", text);
+                println!("AI Response (no function call):\n{}", text);
             }
         }
     } else {
-        println!("Failed to parse response. Raw response:\n{:#?}", response);
+        println!("Failed to parse initial response:\n{:#?}", response);
     }
 
     Ok(())
