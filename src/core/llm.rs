@@ -1,7 +1,70 @@
+use crate::{
+    provider::Provider,
+    tool::{FunctionDeclaration, Tool},
+};
 use reqwest::Client;
 use serde_json::{Value, json};
-use crate::tool::{Tool, FunctionDeclaration};
 use std::error::Error;
+
+pub struct GenerationOptions {
+    pub system_prompt: Option<String>,
+    pub messages: Option<Vec<Message>>,
+    // Add other optional parameters here (temperature, max tokens, etc.)
+}
+
+impl GenerationOptions {
+    pub fn new() -> GenerationOptionsBuilder {
+        GenerationOptionsBuilder::default()
+    }
+}
+
+#[derive(Default)]
+pub struct GenerationOptionsBuilder {
+    system_prompt: Option<String>,
+    messages: Option<Vec<Message>>,
+}
+
+impl GenerationOptionsBuilder {
+    pub fn system_prompt(mut self, prompt: impl Into<String>) -> Self {
+        self.system_prompt = Some(prompt.into());
+        self
+    }
+
+    pub fn messages(mut self, messages: Vec<Message>) -> Self {
+        self.messages = Some(messages);
+        self
+    }
+
+    // Do I need this?
+    pub fn build(self) -> GenerationOptions {
+        GenerationOptions {
+            system_prompt: self.system_prompt,
+            messages: self.messages,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Role {
+    System,
+    User,
+    Assistant,
+}
+
+pub struct Message {
+    pub role: Role,
+    pub content: String,
+}
+
+pub async fn generate_text(
+    provider: &dyn Provider,
+    prompt: &str,
+    options: &GenerationOptions,
+) -> Result<String, Box<dyn Error>> {
+    let response = provider.generate_text(prompt, options).await.unwrap();
+
+    Ok(response)
+}
 
 /// Generate content using the LLM with tools
 pub async fn generate_content_with_tools(
@@ -75,7 +138,7 @@ pub async fn send_function_results(
             parameters: tool.parameters.clone(),
         })
         .collect();
-    
+
     // Create request with conversation history including function result
     let request_body = json!({
         "contents": [
@@ -130,10 +193,12 @@ pub async fn send_function_results(
 /// Extract function call information from LLM response
 pub fn extract_function_call(response: &Value) -> Option<(String, Value)> {
     response
-        .get("candidates")?.as_array()?
+        .get("candidates")?
+        .as_array()?
         .first()?
         .get("content")?
-        .get("parts")?.as_array()?
+        .get("parts")?
+        .as_array()?
         .first()?
         .get("functionCall")
         .and_then(|function_call| {
@@ -146,11 +211,14 @@ pub fn extract_function_call(response: &Value) -> Option<(String, Value)> {
 /// Extract text response from LLM
 pub fn extract_text_response(response: &Value) -> Option<String> {
     response
-        .get("candidates")?.as_array()?
+        .get("candidates")?
+        .as_array()?
         .first()?
         .get("content")?
-        .get("parts")?.as_array()?
+        .get("parts")?
+        .as_array()?
         .first()?
-        .get("text")?.as_str()
+        .get("text")?
+        .as_str()
         .map(|s| s.to_string())
 }
