@@ -1,9 +1,6 @@
+use ai::{core::llm, tool};
 use dotenv::dotenv;
 use reqwest::Client;
-use rust_agent::{
-    core::llm,
-    tool,
-};
 use serde_json::json;
 use std::collections::HashMap;
 use std::env;
@@ -46,10 +43,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let prompt = "What's the weather like in San Francisco?";
-    
+
     // First turn: Get function call from LLM
     println!("Sending initial prompt: {}", prompt);
-    let response = llm::generate_content_with_tools(&client, &api_key, prompt, &[weather_tool.clone()]).await?;
+    let response =
+        llm::generate_content_with_tools(&client, &api_key, prompt, &[weather_tool.clone()])
+            .await?;
 
     // Check for function calls in response
     if let Some((function_name, args)) = llm::extract_function_call(&response) {
@@ -58,25 +57,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Args: {}", args);
 
         // Execute the tool
-        if let Some(result) = tool::process_function_call(&[weather_tool.clone()], &function_name, &args) {
+        if let Some(result) =
+            tool::process_function_call(&[weather_tool.clone()], &function_name, &args)
+        {
             println!("\nTool execution result:");
             println!("{}", result);
 
             // Second turn: Send function result back to LLM
             println!("\nSending function result back to LLM...");
-            
+
             // Send request with function result
             let final_response = llm::send_function_results(
-                &client, 
-                &api_key, 
-                prompt, 
-                &function_name, 
-                &result, 
-                &[weather_tool]
-            ).await?;
-            
+                &client,
+                &api_key,
+                prompt,
+                &function_name,
+                &result,
+                &[weather_tool],
+            )
+            .await?;
+
             // Process the final response
-            if let Some((second_function, second_args)) = llm::extract_function_call(&final_response) {
+            if let Some((second_function, second_args)) =
+                llm::extract_function_call(&final_response)
+            {
                 println!("\nAnother function call detected (could process recursively):");
                 println!("Function: {}", second_function);
                 println!("Args: {}", second_args);
