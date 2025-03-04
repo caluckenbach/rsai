@@ -1,4 +1,6 @@
 use reqwest::header;
+use std::any::Any;
+use std::fmt::Debug;
 
 use crate::AIError;
 use crate::provider::Provider;
@@ -30,7 +32,7 @@ pub struct ChatSettings {
     // TODO: add abort signal
     // TODO: hide this implementation detail
     pub headers: reqwest::header::HeaderMap,
-    // TODO: provider options
+    pub provider_options: Option<Box<dyn ProviderOptions>>,
 }
 
 impl Default for ChatSettings {
@@ -44,6 +46,7 @@ impl Default for ChatSettings {
             seed: None,
             max_retries: None,
             headers: reqwest::header::HeaderMap::new(),
+            provider_options: None,
         }
     }
 }
@@ -106,6 +109,11 @@ impl ChatSettings {
         }
         self
     }
+
+    pub fn provider_options(mut self, options: Box<dyn ProviderOptions>) -> Self {
+        self.provider_options = Some(options);
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -119,4 +127,16 @@ pub enum ChatRole {
     System,
     User,
     Assistant,
+}
+
+pub trait ProviderOptions: Debug + Send + Sync + Any {
+    fn clone_box(&self) -> Box<dyn ProviderOptions>;
+
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl Clone for Box<dyn ProviderOptions> {
+    fn clone(&self) -> Self {
+        self.clone_box()
+    }
 }
