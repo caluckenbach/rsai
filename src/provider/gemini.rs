@@ -1,16 +1,12 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{self, Value};
 use std::collections::HashMap;
 
-use crate::{
-    AIError,
-    model::{
-        ChatSettings,
-        chat::{ChatMessage, ChatRole},
-    },
-};
+use crate::AIError;
+use crate::model::chat::{FinishReason, calculate_language_model_usage};
+use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion};
 
 use super::Provider;
 
@@ -91,7 +87,7 @@ impl Provider for GeminiProvider {
         &self,
         prompt: &str,
         settings: &ChatSettings,
-    ) -> Result<String, AIError> {
+    ) -> Result<TextCompletion, AIError> {
         let url = self.get_base_url(false);
 
         let mut contents = Vec::new();
@@ -223,17 +219,52 @@ impl Provider for GeminiProvider {
         }
 
         // Check for function call response
-        if let Some(function_call) = &candidate.content.parts[0].function_call {
-            return Ok(format!(
-                "Function call: {} with args: {}",
-                function_call.name,
-                function_call.args.to_string()
-            ));
-        }
+        //if let Some(function_call) = &candidate.content.parts[0].function_call {
+        //    return Ok(format!(
+        //        "Function call: {} with args: {}",
+        //        function_call.name,
+        //        function_call.args.to_string()
+        //    ));
+        //}
 
         // Get text from the first part (if available)
         if let Some(text) = &candidate.content.parts[0].text {
-            return Ok(text.clone());
+            // Extract finish reason
+            let finish_reason = match &candidate.finish_reason {
+                Some(reason) => match reason.as_str() {
+                    "STOP" => FinishReason::Stop,
+                    "MAX_TOKENS" => FinishReason::Length,
+                    "SAFETY" => FinishReason::ContentFilter,
+                    "RECITATION" => FinishReason::Other,
+                    "TOOL_CALLS" => FinishReason::ToolCalls,
+                    "ERROR" => FinishReason::Error,
+                    _ => FinishReason::Unknown,
+                },
+                None => FinishReason::Unknown,
+            };
+
+            // Extract usage
+            let usage = calculate_language_model_usage(
+                gemini_response
+                    .usage_metadata
+                    .as_ref()
+                    .and_then(|m| m.prompt_token_count)
+                    .unwrap_or(0),
+                gemini_response
+                    .usage_metadata
+                    .as_ref()
+                    .and_then(|m| m.candidates_token_count)
+                    .unwrap_or(0),
+            );
+
+            let completion = TextCompletion {
+                text: text.to_string(),
+                reasoning_text: None,
+                finish_reason,
+                usage,
+            };
+
+            return Ok(completion);
         }
 
         // If we get here, we don't have text or function call

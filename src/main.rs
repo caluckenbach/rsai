@@ -40,7 +40,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Print the response
     println!("\nAI Response:");
-    println!("{}", response);
+    println!("{:#?}", response);
 
     Ok(())
 }

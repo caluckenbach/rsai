@@ -15,7 +15,7 @@ impl<P: Provider> ChatModel<P> {
         Self { provider, settings }
     }
 
-    pub async fn generate_text(&self, prompt: &str) -> Result<String, AIError> {
+    pub async fn generate_text(&self, prompt: &str) -> Result<TextCompletion, AIError> {
         self.provider.generate_text(prompt, &self.settings).await
     }
 }
@@ -138,5 +138,48 @@ pub trait ProviderOptions: Debug + Send + Sync + Any {
 impl Clone for Box<dyn ProviderOptions> {
     fn clone(&self) -> Self {
         self.clone_box()
+    }
+}
+
+#[derive(Debug)]
+pub struct TextCompletion {
+    pub text: String,
+    pub reasoning_text: Option<String>,
+    //pub reasoning:
+    //pub sources:
+    pub finish_reason: FinishReason,
+    pub usage: LanguageModelUsage,
+    // warnings
+    // steps
+    //pub request: String,
+    //pub response: String,
+}
+
+#[derive(Debug)]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ContentFilter,
+    ToolCalls,
+    Error,
+    Other,
+    Unknown,
+}
+
+#[derive(Debug)]
+pub struct LanguageModelUsage {
+    pub prompt_tokens: i32,
+    pub completion_tokens: i32,
+    pub total_tokens: i32,
+}
+
+pub fn calculate_language_model_usage(
+    prompt_tokens: i32,
+    completion_tokens: i32,
+) -> LanguageModelUsage {
+    LanguageModelUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens + completion_tokens,
     }
 }
