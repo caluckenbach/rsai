@@ -1,7 +1,7 @@
 use crate::{
+    error::AIError,
     provider::Provider,
     tool::{FunctionDeclaration, Tool},
-    error::AIError,
 };
 use reqwest::Client;
 use serde_json::{Value, json};
@@ -92,18 +92,6 @@ impl GenerationOptionsBuilder {
             headers: self.headers,
         }
     }
-}
-
-#[derive(Debug)]
-pub enum Role {
-    System,
-    User,
-    Assistant,
-}
-
-pub struct Message {
-    pub role: Role,
-    pub content: String,
 }
 
 pub async fn generate_text(

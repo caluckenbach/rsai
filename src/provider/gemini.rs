@@ -1,20 +1,24 @@
-use crate::core::TextStream;
-use crate::core::llm::GenerationOptions;
-use crate::error::AIError;
-use crate::provider::Provider;
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
-/// Gemini provider implementation
+use crate::{
+    AIError,
+    model::{
+        ChatSettings,
+        chat::{ChatMessage, ChatRole},
+    },
+};
+
+use super::Provider;
+
 pub struct GeminiProvider {
     pub api_key: String,
-    pub client: Client,
     pub model: String,
+    pub client: Client,
 }
 
 impl GeminiProvider {
-    /// Create a new GeminiProvider instance
     pub fn new(api_key: &str, model: &str) -> Self {
         GeminiProvider {
             api_key: api_key.to_string(),
@@ -51,38 +55,49 @@ impl GeminiProvider {
 impl Provider for GeminiProvider {
     async fn generate_text(
         &self,
-        contents: &str,
-        options: &GenerationOptions,
+        prompt: &str,
+        settings: &ChatSettings,
     ) -> Result<String, AIError> {
         let url = self.get_base_url(false);
 
-        // Parse the contents into a GeminiMessage
-        let message = Request {
-            contents: vec![Content {
-                role: Role::User,
-                parts: vec![Part {
-                    text: contents.to_string(),
-                }],
-            }],
-        };
+        let mut contents = Vec::new();
 
-        let completion = self
+        if let Some(messages) = &settings.messages {
+            for msg in messages {
+                let content = Content::try_from(msg.clone())?;
+                contents.push(content);
+            }
+        }
+
+        contents.push(Content {
+            role: Role::User,
+            parts: vec![Part {
+                text: prompt.to_string(),
+            }],
+        });
+
+        let message = Request { contents };
+
+        let response = self
             .client
             .post(&url)
             .json(&message)
             .send()
             .await
-            .map_err(|e| AIError::RequestError(e.to_string()));
+            .map_err(|e| AIError::RequestError(e.to_string()))?;
 
-        todo!("Implement the actual API request")
-    }
+        let json_response = response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| AIError::ConversionError(e.to_string()))?;
 
-    async fn stream_text(
-        &self,
-        prompt: &str,
-        options: &GenerationOptions,
-    ) -> Result<TextStream, AIError> {
-        todo!()
+        // Extract response text from Gemini API structure
+        let response_text = json_response["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .ok_or_else(|| AIError::ApiError("Failed to parse response".to_string()))?
+            .to_string();
+
+        Ok(response_text)
     }
 }
 
@@ -109,17 +124,24 @@ pub struct Request {
     pub contents: Vec<Content>,
 }
 
-// Helper function to create a conversation
-pub fn create_conversation(messages: Vec<(Role, &str)>) -> Request {
-    let contents = messages
-        .into_iter()
-        .map(|(role, text)| Content {
-            role,
-            parts: vec![Part {
-                text: text.to_string(),
-            }],
-        })
-        .collect();
+impl TryFrom<ChatMessage> for Content {
+    type Error = AIError;
 
-    Request { contents }
+    fn try_from(msg: ChatMessage) -> Result<Self, Self::Error> {
+        let role = match msg.role {
+            ChatRole::System => {
+                return Err(AIError::UnsuportedFunctionality(
+                    "system messages are only supported at the beginning of the converstation"
+                        .to_string(),
+                ));
+            }
+            ChatRole::User => Role::User,
+            ChatRole::Assistant => Role::Model,
+        };
+
+        Ok(Content {
+            role,
+            parts: vec![Part { text: msg.content }],
+        })
+    }
 }

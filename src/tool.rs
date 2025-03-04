@@ -67,11 +67,7 @@ pub fn tool(
 }
 
 // Process a function call by finding the appropriate tool and executing it
-pub fn process_function_call(
-    tools: &[Tool],
-    function_name: &str,
-    args: &Value,
-) -> Option<Value> {
+pub fn process_function_call(tools: &[Tool], function_name: &str, args: &Value) -> Option<Value> {
     let tool = tools.iter().find(|t| t.name == function_name)?;
 
     // Convert args to HashMap<String, String>
