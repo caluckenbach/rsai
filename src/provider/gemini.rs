@@ -1,3 +1,6 @@
+// Remove this in the future
+#![allow(dead_code)]
+
 use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -11,9 +14,9 @@ use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion};
 use super::Provider;
 
 pub struct GeminiProvider {
-    pub api_key: String,
-    pub model: String,
-    pub client: Client,
+    api_key: String,
+    model: String,
+    client: Client,
 }
 
 impl GeminiProvider {
@@ -276,246 +279,246 @@ impl Provider for GeminiProvider {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-pub enum Role {
+enum Role {
     User,
     Model,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Part {
+struct Part {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
+    text: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_call: Option<FunctionCall>,
+    function_call: Option<FunctionCall>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub inline_data: Option<InlineData>,
+    inline_data: Option<InlineData>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionCall {
-    pub name: String,
-    pub args: Value,
+struct FunctionCall {
+    name: String,
+    args: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionResponse {
-    pub name: String,
-    pub response: FunctionResponseContent,
+struct FunctionResponse {
+    name: String,
+    response: FunctionResponseContent,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionResponseContent {
-    pub name: String,
-    pub content: Value,
+struct FunctionResponseContent {
+    name: String,
+    content: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct InlineData {
-    pub mime_type: String,
-    pub data: String,
+struct InlineData {
+    mime_type: String,
+    data: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Content {
-    pub role: Role,
-    pub parts: Vec<Part>,
+struct Content {
+    role: Role,
+    parts: Vec<Part>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Request {
-    pub contents: Vec<Content>,
+struct Request {
+    contents: Vec<Content>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub system_instruction: Option<SystemInstruction>,
+    system_instruction: Option<SystemInstruction>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub generation_config: Option<GenerationConfig>,
+    generation_config: Option<GenerationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub safety_settings: Option<Vec<SafetySetting>>,
+    safety_settings: Option<Vec<SafetySetting>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<Tools>,
+    tools: Option<Tools>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_config: Option<ToolConfig>,
+    tool_config: Option<ToolConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub cached_content: Option<String>,
+    cached_content: Option<String>,
 }
 
 // Response structs for parsing Gemini API responses
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GeminiResponse {
-    pub candidates: Vec<Candidate>,
+struct GeminiResponse {
+    candidates: Vec<Candidate>,
     #[serde(default)]
-    pub prompt_feedback: Option<PromptFeedback>,
+    prompt_feedback: Option<PromptFeedback>,
     #[serde(default)]
-    pub usage_metadata: Option<UsageMetadata>,
+    usage_metadata: Option<UsageMetadata>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Candidate {
-    pub content: Content,
+struct Candidate {
+    content: Content,
     #[serde(default)]
-    pub finish_reason: Option<String>,
+    finish_reason: Option<String>,
     #[serde(default)]
-    pub index: Option<i32>,
+    index: Option<i32>,
     #[serde(default)]
-    pub safety_ratings: Option<Vec<SafetyRating>>,
+    safety_ratings: Option<Vec<SafetyRating>>,
     #[serde(default)]
-    pub grounding_metadata: Option<GroundingMetadata>,
+    grounding_metadata: Option<GroundingMetadata>,
     #[serde(default)]
-    pub avg_logprobs: Option<f32>,
+    avg_logprobs: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PromptFeedback {
+struct PromptFeedback {
     #[serde(default)]
-    pub safety_ratings: Option<Vec<SafetyRating>>,
+    safety_ratings: Option<Vec<SafetyRating>>,
     #[serde(default)]
-    pub block_reason: Option<String>,
+    block_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UsageMetadata {
+struct UsageMetadata {
     #[serde(default)]
-    pub prompt_token_count: Option<i32>,
+    prompt_token_count: Option<i32>,
     #[serde(default)]
-    pub candidates_token_count: Option<i32>,
+    candidates_token_count: Option<i32>,
     #[serde(default)]
-    pub total_token_count: Option<i32>,
+    total_token_count: Option<i32>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SafetyRating {
-    pub category: String,
-    pub probability: String,
+struct SafetyRating {
+    category: String,
+    probability: String,
     #[serde(default)]
-    pub probability_score: Option<f32>,
+    probability_score: Option<f32>,
     #[serde(default)]
-    pub severity: Option<String>,
+    severity: Option<String>,
     #[serde(default)]
-    pub severity_score: Option<f32>,
+    severity_score: Option<f32>,
     #[serde(default)]
-    pub blocked: Option<bool>,
+    blocked: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GroundingMetadata {
+struct GroundingMetadata {
     #[serde(default)]
-    pub web_search_queries: Option<Vec<String>>,
+    web_search_queries: Option<Vec<String>>,
     #[serde(default)]
-    pub retrieval_queries: Option<Vec<String>>,
+    retrieval_queries: Option<Vec<String>>,
     #[serde(default)]
-    pub search_entry_point: Option<SearchEntryPoint>,
+    search_entry_point: Option<SearchEntryPoint>,
     #[serde(default)]
-    pub grounding_chunks: Option<Vec<GroundingChunk>>,
+    grounding_chunks: Option<Vec<GroundingChunk>>,
     #[serde(default)]
-    pub grounding_supports: Option<Vec<GroundingSupport>>,
+    grounding_supports: Option<Vec<GroundingSupport>>,
     #[serde(default)]
-    pub retrieval_metadata: Option<RetrievalMetadata>,
+    retrieval_metadata: Option<RetrievalMetadata>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SearchEntryPoint {
-    pub rendered_content: String,
+struct SearchEntryPoint {
+    rendered_content: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GroundingChunk {
+struct GroundingChunk {
     #[serde(default)]
-    pub web: Option<WebSource>,
+    web: Option<WebSource>,
     #[serde(default)]
-    pub retrieved_context: Option<RetrievedContext>,
+    retrieved_context: Option<RetrievedContext>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WebSource {
-    pub uri: String,
+struct WebSource {
+    uri: String,
     #[serde(default)]
-    pub title: Option<String>,
+    title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RetrievedContext {
-    pub uri: String,
+struct RetrievedContext {
+    uri: String,
     #[serde(default)]
-    pub title: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GroundingSupport {
-    pub segment: Segment,
-    #[serde(default)]
-    pub segment_text: Option<String>,
-    #[serde(default)]
-    pub grounding_chunk_indices: Option<Vec<i32>>,
-    #[serde(default)]
-    pub support_chunk_indices: Option<Vec<i32>>,
-    #[serde(default)]
-    pub confidence_scores: Option<Vec<f32>>,
-    #[serde(default)]
-    pub confidence_score: Option<Vec<f32>>,
+    title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Segment {
+struct GroundingSupport {
+    segment: Segment,
     #[serde(default)]
-    pub start_index: Option<i32>,
+    segment_text: Option<String>,
     #[serde(default)]
-    pub end_index: Option<i32>,
+    grounding_chunk_indices: Option<Vec<i32>>,
     #[serde(default)]
-    pub text: Option<String>,
+    support_chunk_indices: Option<Vec<i32>>,
+    #[serde(default)]
+    confidence_scores: Option<Vec<f32>>,
+    #[serde(default)]
+    confidence_score: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RetrievalMetadata {
+struct Segment {
     #[serde(default)]
-    pub web_dynamic_retrieval_score: Option<f32>,
+    start_index: Option<i32>,
+    #[serde(default)]
+    end_index: Option<i32>,
+    #[serde(default)]
+    text: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RetrievalMetadata {
+    #[serde(default)]
+    web_dynamic_retrieval_score: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SystemInstruction {
-    pub parts: Vec<Part>,
+struct SystemInstruction {
+    parts: Vec<Part>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct GenerationConfig {
+struct GenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<i32>,
+    max_output_tokens: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub temperature: Option<f32>,
+    temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_p: Option<f32>,
+    top_p: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_k: Option<i32>,
+    top_k: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub frequency_penalty: Option<f32>,
+    frequency_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub presence_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub stop_sequences: Option<Vec<String>>,
+    stop_sequences: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub seed: Option<i32>,
+    seed: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_mime_type: Option<String>,
+    response_mime_type: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub response_schema: Option<Value>,
+    response_schema: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub audio_timestamp: Option<bool>,
+    audio_timestamp: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -557,41 +560,41 @@ pub enum HarmBlockThreshold {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Tools {
+struct Tools {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_declarations: Option<Vec<FunctionDeclaration>>,
+    function_declarations: Option<Vec<FunctionDeclaration>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub google_search: Option<HashMap<String, Value>>,
+    google_search: Option<HashMap<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub google_search_retrieval: Option<HashMap<String, Value>>,
+    google_search_retrieval: Option<HashMap<String, Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FunctionDeclaration {
-    pub name: String,
+struct FunctionDeclaration {
+    name: String,
     #[serde(skip_serializing_if = "String::is_empty")]
-    pub description: String,
-    pub parameters: Value,
+    description: String,
+    parameters: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ToolConfig {
+struct ToolConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_calling_config: Option<FunctionCallingConfig>,
+    function_calling_config: Option<FunctionCallingConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FunctionCallingConfig {
-    pub mode: FunctionCallingMode,
+struct FunctionCallingConfig {
+    mode: FunctionCallingMode,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub allowed_function_names: Option<Vec<String>>,
+    allowed_function_names: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-pub enum FunctionCallingMode {
+enum FunctionCallingMode {
     Auto,
     None,
     Any,
