@@ -1,15 +1,24 @@
 use crate::{
     provider::Provider,
     tool::{FunctionDeclaration, Tool},
+    error::AIError,
 };
 use reqwest::Client;
 use serde_json::{Value, json};
-use std::error::Error;
 
 pub struct GenerationOptions {
     pub system_prompt: Option<String>,
     pub messages: Option<Vec<Message>>,
     // Add other optional parameters here (temperature, max tokens, etc.)
+    pub max_tokens: Option<i32>,
+    pub temperature: Option<f32>,
+    pub stop_sequences: Option<Vec<String>>,
+    pub seed: Option<i32>,
+    pub max_retries: Option<i32>,
+    // TODO: add abort signal
+    // TODO: hide this implementation detail
+    pub headers: reqwest::header::HeaderMap,
+    // TODO: provider options
 }
 
 impl GenerationOptions {
@@ -22,6 +31,12 @@ impl GenerationOptions {
 pub struct GenerationOptionsBuilder {
     system_prompt: Option<String>,
     messages: Option<Vec<Message>>,
+    max_tokens: Option<i32>,
+    temperature: Option<f32>,
+    stop_sequences: Option<Vec<String>>,
+    seed: Option<i32>,
+    max_retries: Option<i32>,
+    headers: reqwest::header::HeaderMap,
 }
 
 impl GenerationOptionsBuilder {
@@ -35,11 +50,46 @@ impl GenerationOptionsBuilder {
         self
     }
 
-    // Do I need this?
+    pub fn max_tokens(mut self, max_tokens: i32) -> Self {
+        self.max_tokens = Some(max_tokens);
+        self
+    }
+
+    pub fn temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(temperature);
+        self
+    }
+
+    pub fn stop_sequences(mut self, stop_sequences: Vec<String>) -> Self {
+        self.stop_sequences = Some(stop_sequences);
+        self
+    }
+
+    pub fn seed(mut self, seed: i32) -> Self {
+        self.seed = Some(seed);
+        self
+    }
+
+    pub fn max_retries(mut self, max_retries: i32) -> Self {
+        self.max_retries = Some(max_retries);
+        self
+    }
+
+    pub fn headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
+        self.headers = headers;
+        self
+    }
+
     pub fn build(self) -> GenerationOptions {
         GenerationOptions {
             system_prompt: self.system_prompt,
             messages: self.messages,
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            stop_sequences: self.stop_sequences,
+            seed: self.seed,
+            max_retries: self.max_retries,
+            headers: self.headers,
         }
     }
 }
@@ -60,8 +110,8 @@ pub async fn generate_text(
     provider: &dyn Provider,
     prompt: &str,
     options: &GenerationOptions,
-) -> Result<String, Box<dyn Error>> {
-    let response = provider.generate_text(prompt, options).await.unwrap();
+) -> Result<String, AIError> {
+    let response = provider.generate_text(prompt, options).await?;
 
     Ok(response)
 }
@@ -72,7 +122,7 @@ pub async fn generate_content_with_tools(
     api_key: &str,
     prompt: &str,
     tools: &[Tool],
-) -> Result<Value, Box<dyn Error>> {
+) -> Result<Value, AIError> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
         api_key
@@ -123,7 +173,7 @@ pub async fn send_function_results(
     function_name: &str,
     function_result: &Value,
     tools: &[Tool],
-) -> Result<Value, Box<dyn Error>> {
+) -> Result<Value, AIError> {
     let url = format!(
         "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={}",
         api_key

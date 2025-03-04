@@ -1,5 +1,6 @@
-use crate::core::{AIError, TextStream};
+use crate::core::TextStream;
 use crate::core::llm::GenerationOptions;
+use crate::error::AIError;
 use crate::provider::Provider;
 use async_trait::async_trait;
 use reqwest::Client;

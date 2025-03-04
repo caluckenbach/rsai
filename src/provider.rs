@@ -1,7 +1,8 @@
 pub mod gemini;
 
-use crate::core::{AIError, TextStream};
+use crate::core::TextStream;
 use crate::core::llm::GenerationOptions;
+use crate::error::AIError;
 use async_trait::async_trait;
 
 #[async_trait]
