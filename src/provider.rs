@@ -18,5 +18,5 @@ pub trait Provider {
         &self,
         prompt: &str,
         settings: &ChatSettings,
-    ) -> impl Stream<Item = Result<TextStream, AIError>>;
+    ) -> Result<impl Stream<Item = Result<TextStream, AIError>>, AIError>;
 }

@@ -198,7 +198,7 @@ impl Provider for GeminiProvider {
         }
 
         // Parse the response JSON directly
-        let gemini_response = response.json::<GeminiResponse>().await.map_err(|e| {
+        let gemini_response = response.json::<Response>().await.map_err(|e| {
             AIError::ConversionError(format!("Failed to parse Gemini response: {}", e))
         })?;
 
@@ -242,15 +242,15 @@ impl Provider for GeminiProvider {
             // Extract finish reason
             let finish_reason = match &candidate.finish_reason {
                 Some(reason) => match reason.as_str() {
-                    "STOP" => FinishReason::Stop,
-                    "MAX_TOKENS" => FinishReason::Length,
-                    "SAFETY" => FinishReason::ContentFilter,
-                    "RECITATION" => FinishReason::Other,
-                    "TOOL_CALLS" => FinishReason::ToolCalls,
-                    "ERROR" => FinishReason::Error,
-                    _ => FinishReason::Unknown,
+                    "STOP" => ChatFinishReason::Stop,
+                    "MAX_TOKENS" => ChatFinishReason::Length,
+                    "SAFETY" => ChatFinishReason::ContentFilter("Safety".to_string()),
+                    "RECITATION" => ChatFinishReason::Other,
+                    "TOOL_CALLS" => ChatFinishReason::ToolCalls,
+                    "ERROR" => ChatFinishReason::Error,
+                    _ => ChatFinishReason::Unknown,
                 },
-                None => FinishReason::Unknown,
+                None => ChatFinishReason::Unknown,
             };
 
             // Extract usage
@@ -437,7 +437,7 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
 impl From<FinishReason> for ChatFinishReason {
     fn from(finish_reason: FinishReason) -> Self {
         match finish_reason {
-            FinishReason::FinishReasonUnspecified => ChatFinishReason::Unknown,
+            FinishReason::Unspecified => ChatFinishReason::Unknown,
             FinishReason::Stop => ChatFinishReason::Stop,
             FinishReason::MaxTokens => ChatFinishReason::Length,
             FinishReason::Safety => ChatFinishReason::ContentFilter("The response candidate content was flagged for safety reasons.".to_string()),
@@ -856,7 +856,8 @@ struct StreamResponseCandidate {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 enum FinishReason {
-    FinishReasonUnspecified,
+    #[serde(rename = "FINISH_REASON_UNSPECIFIED")]
+    Unspecified,
     Stop,
     MaxTokens,
     Safety,
