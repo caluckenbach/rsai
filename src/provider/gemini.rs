@@ -15,7 +15,6 @@ use crate::AIError;
 use crate::model::chat;
 use crate::model::chat::FinishReason as ChatFinishReason;
 use crate::model::chat::LanguageModelUsage;
-use crate::model::chat::calculate_language_model_usage;
 use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion, TextStream};
 
 use super::Provider;
@@ -57,38 +56,54 @@ impl GeminiProvider {
             format!("{}:generateContent?key={}", model_url, self.api_key)
         }
     }
+}
 
-    fn build_generation_config(&self, settings: &ChatSettings) -> Option<GenerationConfig> {
-        // Only create the config if at least one setting is provided
-        if settings.max_tokens.is_none()
-            && settings.temperature.is_none()
-            && settings.stop_sequences.is_none()
-            && settings.seed.is_none()
-        {
-            return None;
+fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIError> {
+    let mut contents = Vec::new();
+
+    // Handle regular chat messages
+    if let Some(messages) = &settings.messages {
+        for msg in messages {
+            let content = Content::try_from(msg.clone())?;
+            contents.push(content);
         }
-
-        Some(GenerationConfig {
-            max_output_tokens: settings.max_tokens,
-            temperature: settings.temperature,
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
-            stop_sequences: settings.stop_sequences.clone(),
-            seed: settings.seed,
-            response_mime_type: None,
-            response_schema: None,
-            audio_timestamp: None,
-        })
     }
 
-    fn get_provider_settings<'a>(&self, settings: &'a ChatSettings) -> Option<&'a GeminiSettings> {
-        settings
-            .provider_options
-            .as_ref()
-            .and_then(move |options| options.as_any().downcast_ref::<GeminiSettings>())
-    }
+    // Add the current prompt as a user message
+    contents.push(Content {
+        role: Role::User,
+        parts: vec![Part {
+            text: prompt.to_string(),
+        }],
+    });
+
+    // Create system instruction if a system prompt is provided
+    let system_instruction = settings
+        .system_prompt
+        .as_ref()
+        .map(|prompt| SystemInstruction {
+            parts: vec![Part {
+                text: prompt.to_string(),
+            }],
+        });
+
+    // Build generation config from general settingj
+    let generation_config = Option::<GenerationConfig>::from(settings.clone());
+
+    // Get provider-specific settings
+    let provider_settings = Option::<GeminiSettings>::from(settings.clone());
+
+    // Extract provider-specific settings
+    let safety_settings = provider_settings.and_then(|s| s.safety_settings.clone());
+    //let cached_content = provider_settings.and_then(|s| s.cached_content.clone());
+
+    // Create the full request
+    Ok(Request {
+        contents,
+        system_instruction,
+        generation_config,
+        safety_settings,
+    })
 }
 
 #[async_trait]
@@ -100,85 +115,12 @@ impl Provider for GeminiProvider {
     ) -> Result<TextCompletion, AIError> {
         let url = self.get_base_url(false);
 
-        let mut contents = Vec::new();
+        let request = build_request(prompt, settings)?;
 
-        // Handle regular chat messages
-        if let Some(messages) = &settings.messages {
-            for msg in messages {
-                let content = Content::try_from(msg.clone())?;
-                contents.push(content);
-            }
-        }
-
-        // Add the current prompt as a user message
-        contents.push(Content {
-            role: Role::User,
-            parts: vec![Part {
-                text: prompt.to_string(),
-            }],
-        });
-
-        // Create system instruction if a system prompt is provided
-        let system_instruction = settings
-            .system_prompt
-            .as_ref()
-            .map(|prompt| SystemInstruction {
-                parts: vec![Part {
-                    text: prompt.to_string(),
-                }],
-            });
-
-        // Build generation config from general settingj
-        let generation_config = self.build_generation_config(settings);
-
-        // Get provider-specific settings
-        let provider_settings = self.get_provider_settings(settings);
-
-        // Extract provider-specific settings
-        let safety_settings = provider_settings.and_then(|s| s.safety_settings.clone());
-        let cached_content = provider_settings.and_then(|s| s.cached_content.clone());
-
-        // Build search tools if grounding is enabled
-        let tools = if provider_settings
-            .and_then(|s| s.use_search_grounding)
-            .unwrap_or(false)
-        {
-            // Detect if this is a Gemini 2.0 model
-            let is_gemini2 = self.model.contains("gemini-2");
-
-            if is_gemini2 {
-                Some(Tools {
-                    function_declarations: None,
-                    google_search: Some(HashMap::new()),
-                    google_search_retrieval: None,
-                })
-            } else {
-                Some(Tools {
-                    function_declarations: None,
-                    google_search: None,
-                    google_search_retrieval: Some(HashMap::new()),
-                })
-            }
-        } else {
-            None
-        };
-
-        // Create the full request
-        let message = Request {
-            contents,
-            system_instruction,
-            generation_config,
-            safety_settings,
-            tools,
-            tool_config: None, // No tool config for now
-            cached_content,
-        };
-
-        // Send the request
         let response = self
             .client
             .post(&url)
-            .json(&message)
+            .json(&request)
             .send()
             .await
             .map_err(|e| AIError::RequestError(e.to_string()))?;
@@ -238,38 +180,12 @@ impl Provider for GeminiProvider {
     ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
         let url = self.get_base_url(true);
 
-        let mut contents = Vec::new();
-
-        // Handle regular chat messages
-        if let Some(messages) = &settings.messages {
-            for msg in messages {
-                let content = Content::try_from(msg.clone())?;
-                contents.push(content);
-            }
-        }
-
-        // Add the current prompt as a user message
-        contents.push(Content {
-            role: Role::User,
-            parts: vec![Part {
-                text: prompt.to_string(),
-            }],
-        });
-
-        let message = Request {
-            contents,
-            system_instruction: None,
-            generation_config: None,
-            safety_settings: None,
-            tools: None,
-            tool_config: None,
-            cached_content: None,
-        };
+        let request = build_request(prompt, settings)?;
 
         let response = self
             .client
             .post(url)
-            .json(&message)
+            .json(&request)
             .send()
             .await
             .map_err(|e| AIError::ApiError(e.to_string()))
@@ -322,7 +238,7 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
             return Ok(TextStream {
                 text: String::new(),
                 finish_reason: chat::FinishReason::Stop,
-                usage: Some(chat::calculate_language_model_usage(0, 0)),
+                usage: None,
             });
         }
 
@@ -355,7 +271,7 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
     Ok(TextStream {
         text: String::new(),
         finish_reason: chat::FinishReason::Other,
-        usage: Some(chat::calculate_language_model_usage(0, 0)),
+        usage: None,
     })
 }
 
@@ -411,12 +327,6 @@ struct Request {
     generation_config: Option<GenerationConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     safety_settings: Option<Vec<SafetySetting>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Tools>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_config: Option<ToolConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cached_content: Option<String>,
 }
 
 // Response structs for parsing Gemini API responses
@@ -443,35 +353,6 @@ struct Candidate {
     /// If this is `None` the model hasn't stopped generating tokens yet.
     finish_reason: Option<FinishReason>,
     token_count: Option<i32>,
-}
-
-impl TryFrom<Candidate> for TextCompletion {
-    type Error = AIError;
-
-    fn try_from(candidate: Candidate) -> Result<Self, Self::Error> {
-        // Extract text from the first part (if available)
-        if candidate.content.parts.is_empty() {
-            return Err(AIError::ApiError(
-                "No content parts in response".to_string(),
-            ));
-        }
-
-        // Extract finish reason
-        let finish_reason = match &candidate.finish_reason {
-            // TODO: Fix clone here
-            Some(reason) => ChatFinishReason::from(reason.clone()),
-            None => ChatFinishReason::Unknown,
-        };
-
-        // Create default usage that will be updated later with proper values
-        let completion = TextCompletion {
-            text: candidate.content.parts[0].text.to_string(),
-            finish_reason,
-            usage: calculate_language_model_usage(0, 0),
-        };
-
-        Ok(completion)
-    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -627,6 +508,32 @@ struct GenerationConfig {
     response_schema: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     audio_timestamp: Option<bool>,
+}
+
+impl From<ChatSettings> for Option<GenerationConfig> {
+    fn from(settings: ChatSettings) -> Self {
+        if settings.max_tokens.is_none()
+            && settings.temperature.is_none()
+            && settings.stop_sequences.is_none()
+            && settings.seed.is_none()
+        {
+            return None;
+        }
+
+        Some(GenerationConfig {
+            max_output_tokens: settings.max_tokens,
+            temperature: settings.temperature,
+            top_p: None,
+            top_k: None,
+            frequency_penalty: None,
+            presence_penalty: None,
+            stop_sequences: settings.stop_sequences.clone(),
+            seed: settings.seed,
+            response_mime_type: None,
+            response_schema: None,
+            audio_timestamp: None,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -824,6 +731,16 @@ impl GeminiSettings {
     /// Convert to a Box<dyn ProviderOptions> for use with ChatSettings
     pub fn into_provider_options(self) -> Box<dyn crate::model::chat::ProviderOptions> {
         Box::new(self)
+    }
+}
+
+impl From<ChatSettings> for Option<GeminiSettings> {
+    fn from(settings: ChatSettings) -> Self {
+        settings
+            .provider_options
+            .as_ref()
+            .and_then(move |options| options.as_any().downcast_ref::<GeminiSettings>())
+            .cloned()
     }
 }
 
