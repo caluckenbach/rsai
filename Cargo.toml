@@ -21,3 +21,7 @@ dotenv = "0.15.0"
 [[example]]
 name = "simple-chat"
 path = "examples/simple-chat/main.rs"
+
+[[example]]
+name = "stream-chat"
+path = "examples/stream-chat/main.rs"
