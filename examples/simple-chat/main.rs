@@ -17,9 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = GeminiProvider::default(&api_key);
 
     // Create Gemini-specific settings
-    let gemini_settings = GeminiSettings::new()
-        .use_search_grounding(true)
-        .into_provider_options();
+    let gemini_settings = GeminiSettings::new().into_provider_options();
 
     // Create chat settings with a system message
     let settings = ChatSettings::new()

@@ -19,6 +19,9 @@ use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion, TextStre
 
 use super::Provider;
 
+const DEFAULT_MODEL: &str = "gemini-2.0-flash";
+const API_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models/";
+
 pub struct GeminiProvider {
     api_key: String,
     model: String,
@@ -26,6 +29,7 @@ pub struct GeminiProvider {
 }
 
 impl GeminiProvider {
+    /// Creates a new `GeminiProvider` with the specified API key and model
     pub fn new(api_key: &str, model: &str) -> Self {
         GeminiProvider {
             api_key: api_key.to_string(),
@@ -34,34 +38,21 @@ impl GeminiProvider {
         }
     }
 
-    /// Create a new GeminiProvider with default model
-    ///
-    /// default model: `gemini-2.0-flash`
+    /// Creates a `GeminiProvider` with the default model (`gemini-2.0-flash`)/
     pub fn default(api_key: &str) -> Self {
-        Self::new(api_key, "gemini-2.0-flash")
+        Self::new(api_key, DEFAULT_MODEL)
     }
 
-    fn get_base_url(&self, stream: bool) -> String {
-        let model_url = format!(
-            "https://generativelanguage.googleapis.com/v1beta/models/{}",
-            self.model
-        );
-
-        if stream {
-            format!(
-                "{}:streamGenerateContent?alt=sse&key={}",
-                model_url, self.api_key
-            )
-        } else {
-            format!("{}:generateContent?key={}", model_url, self.api_key)
-        }
+    /// Constructs the model URL for the Gemini API
+    fn get_model_url(&self) -> String {
+        format!("{}{}", API_BASE_URL, self.model)
     }
 }
 
+/// Builds the request payload for the Gemini API
 fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIError> {
     let mut contents = Vec::new();
 
-    // Handle regular chat messages
     if let Some(messages) = &settings.messages {
         for msg in messages {
             let content = Content::try_from(msg.clone())?;
@@ -69,7 +60,6 @@ fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIErr
         }
     }
 
-    // Add the current prompt as a user message
     contents.push(Content {
         role: Role::User,
         parts: vec![Part {
@@ -77,7 +67,6 @@ fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIErr
         }],
     });
 
-    // Create system instruction if a system prompt is provided
     let system_instruction = settings
         .system_prompt
         .as_ref()
@@ -87,17 +76,10 @@ fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIErr
             }],
         });
 
-    // Build generation config from general settingj
     let generation_config = Option::<GenerationConfig>::from(settings.clone());
-
-    // Get provider-specific settings
     let provider_settings = Option::<GeminiSettings>::from(settings.clone());
-
-    // Extract provider-specific settings
     let safety_settings = provider_settings.and_then(|s| s.safety_settings.clone());
-    //let cached_content = provider_settings.and_then(|s| s.cached_content.clone());
 
-    // Create the full request
     Ok(Request {
         contents,
         system_instruction,
@@ -113,19 +95,19 @@ impl Provider for GeminiProvider {
         prompt: &str,
         settings: &ChatSettings,
     ) -> Result<TextCompletion, AIError> {
-        let url = self.get_base_url(false);
-
+        let url = format!("{}:generateContent", self.get_model_url());
         let request = build_request(prompt, settings)?;
 
         let response = self
             .client
             .post(&url)
+            .headers(settings.headers.clone())
+            .query(&[("key", &self.api_key)])
             .json(&request)
             .send()
             .await
             .map_err(|e| AIError::RequestError(e.to_string()))?;
 
-        // Check if the request was successful
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
@@ -135,42 +117,36 @@ impl Provider for GeminiProvider {
             )));
         }
 
-        let gemini_response = response
+        let parsed_response = response
             .json::<GenerateContentResponse>()
             .await
             .map_err(|e| AIError::ConversionError(format!("Failed to Content response: {}", e)))?;
 
-        if gemini_response.candidates.is_empty() {
-            return Err(AIError::ApiError(
-                "No response candidates returned".to_string(),
-            ));
-        }
+        let candidate = parsed_response
+            .candidates
+            .first()
+            .ok_or_else(|| AIError::ApiError("No response candidates returned".to_string()))?;
 
-        let candidate = &gemini_response.candidates[0];
+        let text = candidate
+            .content
+            .parts
+            .first()
+            .ok_or_else(|| AIError::ApiError("No content parts in response".to_string()))?
+            .text
+            .clone();
 
-        if candidate.content.parts.is_empty() {
-            return Err(AIError::ApiError(
-                "No content parts in response".to_string(),
-            ));
-        }
+        let finish_reason = candidate
+            .finish_reason
+            .clone()
+            .map_or(ChatFinishReason::Unknown, ChatFinishReason::from);
 
-        let text = &candidate.content.parts[0].text;
-        let mut finish_reason = ChatFinishReason::Unknown;
+        let usage = LanguageModelUsage::try_from(parsed_response.usage_metadata)?;
 
-        // TODO: Get rid of the cloning here.
-        if let Some(reason) = candidate.finish_reason.clone() {
-            finish_reason = ChatFinishReason::from(reason);
-        }
-
-        let usage = LanguageModelUsage::try_from(gemini_response.usage_metadata)?;
-
-        let completion = TextCompletion {
+        Ok(TextCompletion {
             text: text.to_string(),
             finish_reason,
             usage,
-        };
-
-        Ok(completion)
+        })
     }
 
     async fn stream_text<'a>(
@@ -178,18 +154,18 @@ impl Provider for GeminiProvider {
         prompt: &'a str,
         settings: &'a ChatSettings,
     ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
-        let url = self.get_base_url(true);
-
+        let url = format!("{}:streamGenerateContent", self.get_model_url());
         let request = build_request(prompt, settings)?;
 
         let response = self
             .client
             .post(url)
+            .headers(settings.headers.clone())
+            .query(&[("key", &self.api_key), ("alt", &"sse".to_string())])
             .json(&request)
             .send()
             .await
-            .map_err(|e| AIError::ApiError(e.to_string()))
-            .unwrap();
+            .map_err(|e| AIError::ApiError(e.to_string()))?;
 
         if !response.status().is_success() {
             return Err(AIError::ApiError(format!(
@@ -200,8 +176,7 @@ impl Provider for GeminiProvider {
         }
 
         let bytes_stream = response.bytes_stream();
-
-        let stream = bytes_stream.map(|result| match result {
+        Ok(bytes_stream.map(|result| match result {
             Ok(bytes) => match parse_sse_chunk(bytes) {
                 Ok(text_stream) => Ok(text_stream),
                 Err(e) => Err(AIError::ConversionError(format!(
@@ -210,18 +185,17 @@ impl Provider for GeminiProvider {
                 ))),
             },
             Err(e) => Err(AIError::RequestError(format!("Stream error: {}", e))),
-        });
-
-        Ok(stream)
+        }))
     }
 }
 
+/// Parses an SSE chunk into a `TextStream`
 fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
-    // check if the chunk is valid utf-8
     let chunk_str = from_utf8(&bytes)
-        .map_err(|e| AIError::ConversionError(format!("Invalid UTF-8 in SSE chunk: {}", e)))?;
+        .map_err(|e| AIError::ConversionError(format!("Invalid UTF-8 in SSE chunk: {}", e)))?
+        .trim();
 
-    if chunk_str.trim().is_empty() {
+    if chunk_str.is_empty() {
         return Ok(TextStream {
             text: String::new(),
             finish_reason: ChatFinishReason::Unknown,
@@ -229,49 +203,45 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
         });
     }
 
-    // check if stream is completed "[DONE]" or data
-    if let Some(data) = chunk_str.strip_prefix("data: ") {
-        let data = data.trim();
+    let Some(data) = chunk_str.strip_prefix("data: ") else {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: ChatFinishReason::Other,
+            usage: None,
+        });
+    };
 
-        // Check for completion marker
-        if data == "[DONE]" {
-            return Ok(TextStream {
-                text: String::new(),
-                finish_reason: chat::FinishReason::Stop,
-                usage: None,
-            });
-        }
-
-        let chunk = serde_json::from_str::<GenerateContentResponse>(data)
-            .map_err(|e| AIError::ConversionError(format!("Invalid JSON: {}", e)))?;
-
-        if !chunk.candidates.is_empty() && !chunk.candidates[0].content.parts.is_empty() {
-            let text = chunk.candidates[0].content.parts[0].text.to_string();
-
-            let mut finish_reason = ChatFinishReason::Unknown;
-
-            // TODO: Get rid of the cloning here.
-            if let Some(reason) = chunk.candidates[0].finish_reason.clone() {
-                finish_reason = ChatFinishReason::from(reason);
-            }
-
-            let usage = match LanguageModelUsage::try_from(chunk.usage_metadata) {
-                Ok(result) => Some(result),
-                Err(_) => None,
-            };
-
-            return Ok(TextStream {
-                text,
-                finish_reason,
-                usage,
-            });
-        }
+    let data = data.trim();
+    if data == "[DONE]" {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Stop,
+            usage: None,
+        });
     }
-    // handle empty or male-formatted chunk
+
+    let chunk = serde_json::from_str::<GenerateContentResponse>(data)
+        .map_err(|e| AIError::ConversionError(format!("Invalid JSON: {}", e)))?;
+
+    if chunk.candidates.is_empty() || chunk.candidates[0].content.parts.is_empty() {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: ChatFinishReason::Other,
+            usage: None,
+        });
+    }
+
+    let text = chunk.candidates[0].content.parts[0].text.clone();
+    let finish_reason = chunk.candidates[0]
+        .finish_reason
+        .clone()
+        .map_or(ChatFinishReason::Unknown, ChatFinishReason::from);
+    let usage = LanguageModelUsage::try_from(chunk.usage_metadata).ok();
+
     Ok(TextStream {
-        text: String::new(),
-        finish_reason: chat::FinishReason::Other,
-        usage: None,
+        text,
+        finish_reason,
+        usage,
     })
 }
 
@@ -317,7 +287,7 @@ struct Content {
     role: Role,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Request {
     contents: Vec<Content>,
