@@ -14,4 +14,7 @@ pub enum AIError {
 
     #[error("this functionality isn't supported by the current provider: {0}")]
     UnsupportedFunctionality(String),
+    
+    #[error("invalid input: {0}")]
+    InvalidInput(String),
 }

@@ -1,3 +1,3 @@
 pub mod chat;
 
-pub use chat::{ChatMessage, ChatModel, ChatRole, ChatSettings, TextCompletion, TextStream};
+pub use chat::{ChatModel, ChatRole, ChatSettings, Message, TextCompletion, TextStream};

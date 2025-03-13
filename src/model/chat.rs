@@ -31,14 +31,57 @@ impl<P: Provider> ChatModel<P> {
 
 #[derive(Debug, Clone)]
 pub struct ChatSettings {
+    /// System prompt specifying model behavior.
     pub system_prompt: Option<String>,
-    pub messages: Option<Vec<ChatMessage>>,
+
+    /// List of `Message` representing a conversation.
+    pub messages: Option<Vec<Message>>,
+
+    /// Maximum number of tokens to generate.
     pub max_tokens: Option<i32>,
-    pub temperature: Option<f32>,
+
+    /// Temperature differs between providers.
+    ///
+    /// Use the `temperature()` method to set a normalized temperature value.
+    /// For provider-specific temperature values, use the `raw_temperature()` method instead.
+    pub temperature: Option<Temperature>,
+
+    /// If the model generates any of these sequences, it will stop generating further text.
     pub stop_sequences: Option<Vec<String>>,
-    pub seed: Option<i32>,
+
+    /// Additional HTTP request headers.
     pub headers: reqwest::header::HeaderMap,
+
+    /// Provider-specific options.
     pub provider_options: Option<Box<dyn ProviderOptions>>,
+}
+
+/// Temperature setting.
+///
+/// Disable normalization by setting `raw` to `true`.
+#[derive(Debug, Clone)]
+pub enum Temperature {
+    Raw(f32),
+    Normalized(f32),
+}
+
+/// A validated temperature value that is guaranteed to be between 0.0 and 1.0.
+pub struct ValidTemperature(f32);
+
+impl ValidTemperature {
+    /// Creates a new temperature value that is checked at compile time.
+    /// Will cause a compile error if the value is outside the valid range.
+    pub const fn new(value: f32) -> Self {
+        assert!(
+            value >= 0.0 && value <= 1.0,
+            "Temperature must be between 0.0 and 1.0"
+        );
+        Self(value)
+    }
+
+    pub fn value(&self) -> f32 {
+        self.0
+    }
 }
 
 impl Default for ChatSettings {
@@ -49,7 +92,6 @@ impl Default for ChatSettings {
             max_tokens: None,
             temperature: None,
             stop_sequences: None,
-            seed: None,
             headers: reqwest::header::HeaderMap::new(),
             provider_options: None,
         }
@@ -66,12 +108,12 @@ impl ChatSettings {
         self
     }
 
-    pub fn messages(mut self, messages: Vec<ChatMessage>) -> Self {
+    pub fn messages(mut self, messages: Vec<Message>) -> Self {
         self.messages = Some(messages);
         self
     }
 
-    pub fn add_message(mut self, message: ChatMessage) -> Self {
+    pub fn add_message(mut self, message: Message) -> Self {
         let messages = self.messages.get_or_insert_with(Vec::new);
         messages.push(message);
         self
@@ -82,8 +124,20 @@ impl ChatSettings {
         self
     }
 
+    /// Sets a normalized temperature between 0.0 and 1.0.
+    /// Returns an error if the temperature is outside this range.
+    /// For temperatures outside this range, use `raw_temperature()`.
     pub fn temperature(mut self, temperature: f32) -> Self {
-        self.temperature = Some(temperature);
+        self.temperature = Some(Temperature::Normalized(
+            ValidTemperature::new(temperature).value(),
+        ));
+        self
+    }
+
+    /// Sets a raw temperature value without normalization.
+    /// Use this for provider-specific temperature values that may be outside the 0.0 - 1.0 range.
+    pub fn raw_temperature(mut self, temperature: f32) -> Self {
+        self.temperature = Some(Temperature::Raw(temperature));
         self
     }
 
@@ -95,11 +149,6 @@ impl ChatSettings {
     pub fn add_stop_sequence(mut self, stop_sequence: impl Into<String>) -> Self {
         let sequences = self.stop_sequences.get_or_insert_with(Vec::new);
         sequences.push(stop_sequence.into());
-        self
-    }
-
-    pub fn seed(mut self, seed: i32) -> Self {
-        self.seed = Some(seed);
         self
     }
 
@@ -117,7 +166,7 @@ impl ChatSettings {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChatMessage {
+pub struct Message {
     pub role: ChatRole,
     pub content: String,
 }
@@ -149,10 +198,6 @@ pub struct TextCompletion {
     //pub sources:
     pub finish_reason: FinishReason,
     pub usage: LanguageModelUsage,
-    // warnings
-    // steps
-    //pub request: String,
-    //pub response: String,
 }
 
 #[derive(Debug)]

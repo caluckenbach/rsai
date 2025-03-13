@@ -10,7 +10,8 @@ use crate::AIError;
 use crate::model::chat;
 use crate::model::chat::FinishReason as ChatFinishReason;
 use crate::model::chat::LanguageModelUsage;
-use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion, TextStream};
+use crate::model::chat::Temperature;
+use crate::model::{ChatRole, ChatSettings, Message, TextCompletion, TextStream};
 
 use super::Provider;
 
@@ -369,25 +370,28 @@ struct GenerationConfig {
     max_output_tokens: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    seed: Option<i32>,
 }
 
 impl From<ChatSettings> for Option<GenerationConfig> {
     fn from(settings: ChatSettings) -> Self {
+        // Early return if no generation config parameters are set
         if settings.max_tokens.is_none()
             && settings.temperature.is_none()
             && settings.stop_sequences.is_none()
-            && settings.seed.is_none()
         {
             return None;
         }
 
+        // Map Temperature enum to Gemini's temperature scale [0.0-2.0]
+        let temperature = settings.temperature.map(|temp| match temp {
+            Temperature::Raw(val) => val,
+            Temperature::Normalized(val) => val * 2.0,
+        });
+
         Some(GenerationConfig {
             max_output_tokens: settings.max_tokens,
-            temperature: settings.temperature,
+            temperature,
             stop_sequences: settings.stop_sequences.clone(),
-            seed: settings.seed,
         })
     }
 }
@@ -557,10 +561,10 @@ impl crate::model::chat::ProviderOptions for GeminiSettings {
     }
 }
 
-impl TryFrom<ChatMessage> for Content {
+impl TryFrom<Message> for Content {
     type Error = AIError;
 
-    fn try_from(msg: ChatMessage) -> Result<Self, Self::Error> {
+    fn try_from(msg: Message) -> Result<Self, Self::Error> {
         let role = match msg.role {
             // System messages are handled separately via SystemInstruction
             ChatRole::System => {
