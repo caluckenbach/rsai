@@ -2,14 +2,21 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::Stream;
+use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use std::collections::HashMap;
+use std::str::from_utf8;
 
 use crate::AIError;
-use crate::model::chat::{FinishReason, calculate_language_model_usage};
-use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion};
+use crate::model::chat;
+use crate::model::chat::FinishReason as ChatFinishReason;
+use crate::model::chat::LanguageModelUsage;
+use crate::model::chat::calculate_language_model_usage;
+use crate::model::{ChatMessage, ChatRole, ChatSettings, TextCompletion, TextStream};
 
 use super::Provider;
 
@@ -275,6 +282,199 @@ impl Provider for GeminiProvider {
             "Response contained no text or function call".to_string(),
         ))
     }
+
+    async fn stream_text(
+        &self,
+        prompt: &str,
+        settings: &ChatSettings,
+    ) -> Result<impl Stream<Item = Result<TextStream, AIError>>, AIError> {
+        let url = self.get_base_url(true);
+
+        let mut contents = Vec::new();
+
+        // Handle regular chat messages
+        if let Some(messages) = &settings.messages {
+            for msg in messages {
+                let content = Content::try_from(msg.clone())?;
+                contents.push(content);
+            }
+        }
+
+        // Add the current prompt as a user message
+        contents.push(Content {
+            role: Role::User,
+            parts: vec![Part {
+                text: Some(prompt.to_string()),
+                function_call: None,
+                inline_data: None,
+            }],
+        });
+
+        let message = Request {
+            contents,
+            system_instruction: None,
+            generation_config: None,
+            safety_settings: None,
+            tools: None,
+            tool_config: None,
+            cached_content: None,
+        };
+
+        let response = self
+            .client
+            .post(url)
+            .json(&message)
+            .send()
+            .await
+            .map_err(|e| AIError::ApiError(e.to_string()))
+            .unwrap();
+
+        if !response.status().is_success() {
+            return Err(AIError::ApiError(format!(
+                "error status {} - {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            )));
+        }
+
+        let bytes_stream = response.bytes_stream();
+
+        let stream = bytes_stream.map(|result| match result {
+            Ok(bytes) => match parse_sse_chunk(bytes) {
+                Ok(text_stream) => Ok(text_stream),
+                Err(e) => Err(AIError::ConversionError(format!(
+                    "Failed to parse SSE: {}",
+                    e
+                ))),
+            },
+            Err(e) => Err(AIError::RequestError(format!("Stream error: {}", e))),
+        });
+
+        Ok(stream)
+    }
+}
+
+fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
+    // check if the chunk is valid utf-8
+    let chunk_str = from_utf8(&bytes)
+        .map_err(|e| AIError::ConversionError(format!("Invalid UTF-8 in SSE chunk: {}", e)))?;
+
+    if chunk_str.trim().is_empty() {
+        return Ok(TextStream {
+            text: String::new(),
+            reasoning_text: None,
+            finish_reason: ChatFinishReason::Unknown,
+            usage: None,
+        });
+    }
+
+    // check if stream is completed "[DONE]" or data
+    if let Some(data) = chunk_str.strip_prefix("data: ") {
+        let data = data.trim();
+
+        // Check for completion marker
+        if data == "[DONE]" {
+            return Ok(TextStream {
+                text: String::new(),
+                reasoning_text: None,
+                finish_reason: chat::FinishReason::Stop,
+                usage: Some(chat::calculate_language_model_usage(0, 0)),
+            });
+        }
+
+        let chunk = serde_json::from_str::<StreamResponseChunk>(data)
+            .map_err(|e| AIError::ConversionError(format!("Invalid JSON: {}", e)))?;
+
+        if !chunk.candidates.is_empty() && !chunk.candidates[0].content.is_empty() {
+            let text = chunk.candidates[0].content[0].parts[0].text.to_string();
+            let mut finish_reason = ChatFinishReason::Unknown;
+
+            // TODO: Get rid of the cloning here.
+            if let Some(reason) = chunk.candidates[0].finish_reason.clone() {
+                finish_reason = ChatFinishReason::from(reason);
+            }
+
+            let usage = match chunk.usage_metadata {
+                Some(usage) => {
+                    match (
+                        usage.prompt_token_count,
+                        usage.candidates_token_count,
+                        usage.total_token_count,
+                    ) {
+                        (Some(prompt_tokens), Some(completion_tokens), None) => Some(
+                            chat::calculate_language_model_usage(prompt_tokens, completion_tokens),
+                        ),
+                        (Some(prompt_tokens), Some(completion_tokens), Some(total_tokens)) => {
+                            Some(LanguageModelUsage {
+                                prompt_tokens,
+                                completion_tokens,
+                                total_tokens,
+                            })
+                        }
+                        _ => None,
+                    }
+                }
+                None => None,
+            };
+
+            return Ok(TextStream {
+                text,
+                reasoning_text: None,
+                finish_reason,
+                usage,
+            });
+        }
+    }
+    // handle empty or male-formatted chunk
+    Ok(TextStream {
+        text: String::new(),
+        reasoning_text: None,
+        finish_reason: chat::FinishReason::Other,
+        usage: Some(chat::calculate_language_model_usage(0, 0)),
+    })
+}
+
+impl From<FinishReason> for ChatFinishReason {
+    fn from(finish_reason: FinishReason) -> Self {
+        match finish_reason {
+            FinishReason::FinishReasonUnspecified => ChatFinishReason::Unknown,
+            FinishReason::Stop => ChatFinishReason::Stop,
+            FinishReason::MaxTokens => ChatFinishReason::Length,
+            FinishReason::Safety => ChatFinishReason::ContentFilter("The response candidate content was flagged for safety reasons.".to_string()),
+            FinishReason::Recitation => ChatFinishReason::ContentFilter("The response candidate content was flagged for recitation reasons.".to_string()),
+            FinishReason::Language => ChatFinishReason::Other,
+            FinishReason::Other => ChatFinishReason::Other,
+            FinishReason::Blocklist => ChatFinishReason::ContentFilter("Token generation stopped because the content contains forbidden terms.".to_string()),
+            FinishReason::ProhibitedContent => ChatFinishReason::ContentFilter("Token generation stopped for potentially containing prohibited content.".to_string()),
+            FinishReason::Spii => ChatFinishReason::ContentFilter("Token generation stopped because the content potentially contains Sensitive Personally Identifiable Information (SPII).".to_string()),
+            FinishReason::MalformedFunctionCall => ChatFinishReason::Error,
+            FinishReason::ImageSafety => ChatFinishReason::ContentFilter("Token generation stopped because generated images contain safety violations.".to_string()),
+        }
+    }
+}
+
+impl TryFrom<UsageMetadata> for LanguageModelUsage {
+    type Error = AIError;
+
+    fn try_from(value: UsageMetadata) -> Result<Self, Self::Error> {
+        let prompt_tokens = value
+            .prompt_token_count
+            .ok_or_else(|| AIError::ConversionError("Missing prompt token count".to_string()))?;
+
+        let completion_tokens = value.candidates_token_count.ok_or_else(|| {
+            AIError::ConversionError("Missing completion token count".to_string())
+        })?;
+
+        let total_tokens = value
+            .total_token_count
+            .unwrap_or(prompt_tokens + completion_tokens);
+
+        Ok(LanguageModelUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens,
+        })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -347,10 +547,9 @@ struct Request {
 }
 
 // Response structs for parsing Gemini API responses
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct GeminiResponse {
+struct Response {
     candidates: Vec<Candidate>,
     #[serde(default)]
     prompt_feedback: Option<PromptFeedback>,
@@ -372,6 +571,47 @@ struct Candidate {
     grounding_metadata: Option<GroundingMetadata>,
     #[serde(default)]
     avg_logprobs: Option<f32>,
+}
+
+impl TryFrom<Candidate> for TextCompletion {
+    type Error = AIError;
+
+    fn try_from(candidate: Candidate) -> Result<Self, Self::Error> {
+        // Extract text from the first part (if available)
+        if candidate.content.parts.is_empty() {
+            return Err(AIError::ApiError(
+                "No content parts in response".to_string(),
+            ));
+        }
+
+        if let Some(text) = &candidate.content.parts[0].text {
+            // Extract finish reason
+            let finish_reason = match &candidate.finish_reason {
+                Some(reason) => match reason.as_str() {
+                    "STOP" => ChatFinishReason::Stop,
+                    "MAX_TOKENS" => ChatFinishReason::Length,
+                    "SAFETY" => ChatFinishReason::ContentFilter("Safety".to_string()),
+                    "RECITATION" => ChatFinishReason::Other,
+                    "TOOL_CALLS" => ChatFinishReason::ToolCalls,
+                    "ERROR" => ChatFinishReason::Error,
+                    _ => ChatFinishReason::Unknown,
+                },
+                None => ChatFinishReason::Unknown,
+            };
+
+            // Create default usage that will be updated later with proper values
+            let completion = TextCompletion {
+                text: text.to_string(),
+                reasoning_text: None,
+                finish_reason,
+                usage: calculate_language_model_usage(0, 0),
+            };
+
+            return Ok(completion);
+        }
+
+        Err(AIError::ApiError("Response contained no text".to_string()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -598,6 +838,47 @@ enum FunctionCallingMode {
     Auto,
     None,
     Any,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamResponseChunk {
+    candidates: Vec<StreamResponseCandidate>,
+    usage_metadata: Option<UsageMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamResponseCandidate {
+    content: Vec<StreamResponseContent>,
+    finish_reason: Option<FinishReason>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum FinishReason {
+    FinishReasonUnspecified,
+    Stop,
+    MaxTokens,
+    Safety,
+    Recitation,
+    Language,
+    Other,
+    Blocklist,
+    ProhibitedContent,
+    Spii,
+    MalformedFunctionCall,
+    ImageSafety,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamResponseContent {
+    parts: Vec<StreamResponsePart>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamResponsePart {
+    text: String,
+    role: Role,
 }
 
 /// Gemini Provider specific settings

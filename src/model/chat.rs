@@ -155,11 +155,19 @@ pub struct TextCompletion {
     //pub response: String,
 }
 
+#[derive(Debug)]
+pub struct TextStream {
+    pub text: String,
+    pub reasoning_text: Option<String>,
+    pub finish_reason: FinishReason,
+    pub usage: Option<LanguageModelUsage>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum FinishReason {
     Stop,
     Length,
-    ContentFilter,
+    ContentFilter(String),
     ToolCalls,
     Error,
     Other,
