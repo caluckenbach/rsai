@@ -5,6 +5,8 @@ use std::fmt::Debug;
 use crate::AIError;
 use crate::provider::Provider;
 
+use futures::Stream;
+
 pub struct ChatModel<P: Provider> {
     provider: P,
     settings: ChatSettings,
@@ -17,6 +19,13 @@ impl<P: Provider> ChatModel<P> {
 
     pub async fn generate_text(&self, prompt: &str) -> Result<TextCompletion, AIError> {
         self.provider.generate_text(prompt, &self.settings).await
+    }
+
+    pub async fn stream_text<'a>(
+        &'a self,
+        prompt: &'a str,
+    ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
+        self.provider.stream_text(prompt, &self.settings).await
     }
 }
 
@@ -257,6 +266,35 @@ mod tests {
                 },
             })
         }
+
+        async fn stream_text<'a>(
+            &'a self,
+            prompt: &'a str,
+            settings: &'a ChatSettings,
+        ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
+            *self.last_prompt.lock().unwrap() = Some(prompt.to_string());
+            *self.last_settings.lock().unwrap() = Some(settings.clone());
+
+            if matches!(self.response.finish_reason, FinishReason::Error) {
+                return Err(AIError::ApiError("Mock error".to_string()));
+            }
+
+            // Create a simple stream with a single item
+            let stream = futures::stream::once(async move {
+                Ok(TextStream {
+                    text: self.response.text.clone(),
+                    reasoning_text: self.response.reasoning_text.clone(),
+                    finish_reason: self.response.finish_reason.clone(),
+                    usage: Some(LanguageModelUsage {
+                        prompt_tokens: self.response.usage.prompt_tokens,
+                        completion_tokens: self.response.usage.completion_tokens,
+                        total_tokens: self.response.usage.total_tokens,
+                    }),
+                })
+            });
+
+            Ok(stream)
+        }
     }
 
     #[test]
@@ -387,6 +425,140 @@ mod tests {
         let chat_model = ChatModel::new(provider, ChatSettings::new());
 
         let result = chat_model.generate_text("Tell me a joke").await;
+
+        assert!(result.is_err());
+        if let Err(AIError::ApiError(msg)) = result {
+            assert_eq!(msg, "Mock error");
+        } else {
+            panic!("Expected AIError::ApiError");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_stream_text() {
+        let expected_response = TextCompletion {
+            text: "Streaming response".to_string(),
+            reasoning_text: Some("Test reasoning".to_string()),
+            finish_reason: FinishReason::Stop,
+            usage: LanguageModelUsage {
+                prompt_tokens: 10,
+                completion_tokens: 20,
+                total_tokens: 30,
+            },
+        };
+
+        let provider = MockProvider::new(expected_response);
+        let prompt_tracker = provider.last_prompt.clone();
+        let settings_tracker = provider.last_settings.clone();
+        let settings = ChatSettings::new().system_prompt("Test system prompt");
+
+        let stream_result = provider
+            .stream_text("Test prompt", &settings)
+            .await
+            .unwrap();
+        let text_chunks: Vec<Result<TextStream, AIError>> =
+            futures::StreamExt::collect(stream_result).await;
+
+        // Check that we got exactly one chunk
+        assert_eq!(text_chunks.len(), 1);
+
+        // Verify the chunk content
+        let chunk = text_chunks[0].as_ref().unwrap();
+        assert_eq!(chunk.text, "Streaming response");
+        assert_eq!(chunk.reasoning_text, Some("Test reasoning".to_string()));
+        assert_eq!(chunk.finish_reason, FinishReason::Stop);
+
+        // Verify usage metrics
+        let usage = chunk.usage.as_ref().unwrap();
+        assert_eq!(usage.prompt_tokens, 10);
+        assert_eq!(usage.completion_tokens, 20);
+        assert_eq!(usage.total_tokens, 30);
+
+        // Check provider was called with correct arguments
+        let captured_prompt = prompt_tracker.lock().unwrap();
+        assert_eq!(*captured_prompt, Some("Test prompt".to_string()));
+
+        let captured_settings = settings_tracker.lock().unwrap();
+        assert!(captured_settings.is_some());
+        let settings = captured_settings.as_ref().unwrap();
+        assert_eq!(
+            settings.system_prompt,
+            Some("Test system prompt".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mock_provider_stream_text_error() {
+        let provider = MockProvider::with_error();
+        let settings = ChatSettings::new();
+
+        let result = provider.stream_text("Test prompt", &settings).await;
+
+        assert!(result.is_err());
+        if let Err(AIError::ApiError(msg)) = result {
+            assert_eq!(msg, "Mock error");
+        } else {
+            panic!("Expected AIError::ApiError");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_chat_model_stream_text() {
+        let expected_response = TextCompletion {
+            text: "Streaming content".to_string(),
+            reasoning_text: None,
+            finish_reason: FinishReason::Stop,
+            usage: LanguageModelUsage {
+                prompt_tokens: 5,
+                completion_tokens: 15,
+                total_tokens: 20,
+            },
+        };
+
+        let provider = MockProvider::new(expected_response);
+        let prompt_tracker = provider.last_prompt.clone();
+        let settings_tracker = provider.last_settings.clone();
+
+        let chat_settings = ChatSettings::new()
+            .system_prompt("Be concise")
+            .temperature(0.5);
+
+        let chat_model = ChatModel::new(provider, chat_settings);
+
+        let stream_result = chat_model.stream_text("Tell me a story").await.unwrap();
+        let text_chunks: Vec<Result<TextStream, AIError>> = futures::StreamExt::collect(stream_result).await;
+
+        // Check that we got exactly one chunk
+        assert_eq!(text_chunks.len(), 1);
+        
+        // Verify the chunk content
+        let chunk = text_chunks[0].as_ref().unwrap();
+        assert_eq!(chunk.text, "Streaming content");
+        assert_eq!(chunk.finish_reason, FinishReason::Stop);
+        
+        // Verify usage metrics
+        let usage = chunk.usage.as_ref().unwrap();
+        assert_eq!(usage.prompt_tokens, 5);
+        assert_eq!(usage.completion_tokens, 15);
+        assert_eq!(usage.total_tokens, 20);
+        
+        // Check that the provider was called with the correct arguments
+        let captured_prompt = prompt_tracker.lock().unwrap();
+        assert_eq!(*captured_prompt, Some("Tell me a story".to_string()));
+
+        let captured_settings = settings_tracker.lock().unwrap();
+        assert!(captured_settings.is_some());
+        let settings = captured_settings.as_ref().unwrap();
+        assert_eq!(settings.system_prompt, Some("Be concise".to_string()));
+        assert_eq!(settings.temperature, Some(0.5));
+    }
+
+    #[tokio::test]
+    async fn test_chat_model_stream_text_error() {
+        let provider = MockProvider::with_error();
+        let chat_model = ChatModel::new(provider, ChatSettings::new());
+
+        let result = chat_model.stream_text("Tell me a story").await;
 
         assert!(result.is_err());
         if let Err(AIError::ApiError(msg)) = result {

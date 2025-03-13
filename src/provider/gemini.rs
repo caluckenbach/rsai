@@ -283,11 +283,11 @@ impl Provider for GeminiProvider {
         ))
     }
 
-    async fn stream_text(
-        &self,
-        prompt: &str,
-        settings: &ChatSettings,
-    ) -> Result<impl Stream<Item = Result<TextStream, AIError>>, AIError> {
+    async fn stream_text<'a>(
+        &'a self,
+        prompt: &'a str,
+        settings: &'a ChatSettings,
+    ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
         let url = self.get_base_url(true);
 
         let mut contents = Vec::new();
