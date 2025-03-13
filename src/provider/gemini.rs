@@ -114,9 +114,7 @@ impl Provider for GeminiProvider {
         contents.push(Content {
             role: Role::User,
             parts: vec![Part {
-                text: Some(prompt.to_string()),
-                function_call: None,
-                inline_data: None,
+                text: prompt.to_string(),
             }],
         });
 
@@ -126,13 +124,11 @@ impl Provider for GeminiProvider {
             .as_ref()
             .map(|prompt| SystemInstruction {
                 parts: vec![Part {
-                    text: Some(prompt.clone()),
-                    function_call: None,
-                    inline_data: None,
+                    text: prompt.to_string(),
                 }],
             });
 
-        // Build generation config from general settings
+        // Build generation config from general settingj
         let generation_config = self.build_generation_config(settings);
 
         // Get provider-specific settings
@@ -197,90 +193,42 @@ impl Provider for GeminiProvider {
             )));
         }
 
-        // Parse the response JSON directly
-        let gemini_response = response.json::<Response>().await.map_err(|e| {
-            AIError::ConversionError(format!("Failed to parse Gemini response: {}", e))
-        })?;
+        let gemini_response = response
+            .json::<GenerateContentResponse>()
+            .await
+            .map_err(|e| AIError::ConversionError(format!("Failed to Content response: {}", e)))?;
 
-        // Check if we got any candidates
         if gemini_response.candidates.is_empty() {
             return Err(AIError::ApiError(
                 "No response candidates returned".to_string(),
             ));
         }
 
-        // Get the first candidate
         let candidate = &gemini_response.candidates[0];
 
-        // Check if we got blocked by safety filters
-        if let Some(reason) = &candidate.finish_reason {
-            if reason == "SAFETY" {
-                return Err(AIError::ApiError(
-                    "Response blocked by safety filters".to_string(),
-                ));
-            }
-        }
-
-        // Extract the text from the parts
         if candidate.content.parts.is_empty() {
             return Err(AIError::ApiError(
                 "No content parts in response".to_string(),
             ));
         }
 
-        // Check for function call response
-        //if let Some(function_call) = &candidate.content.parts[0].function_call {
-        //    return Ok(format!(
-        //        "Function call: {} with args: {}",
-        //        function_call.name,
-        //        function_call.args.to_string()
-        //    ));
-        //}
+        let text = &candidate.content.parts[0].text;
+        let mut finish_reason = ChatFinishReason::Unknown;
 
-        // Get text from the first part (if available)
-        if let Some(text) = &candidate.content.parts[0].text {
-            // Extract finish reason
-            let finish_reason = match &candidate.finish_reason {
-                Some(reason) => match reason.as_str() {
-                    "STOP" => ChatFinishReason::Stop,
-                    "MAX_TOKENS" => ChatFinishReason::Length,
-                    "SAFETY" => ChatFinishReason::ContentFilter("Safety".to_string()),
-                    "RECITATION" => ChatFinishReason::Other,
-                    "TOOL_CALLS" => ChatFinishReason::ToolCalls,
-                    "ERROR" => ChatFinishReason::Error,
-                    _ => ChatFinishReason::Unknown,
-                },
-                None => ChatFinishReason::Unknown,
-            };
-
-            // Extract usage
-            let usage = calculate_language_model_usage(
-                gemini_response
-                    .usage_metadata
-                    .as_ref()
-                    .and_then(|m| m.prompt_token_count)
-                    .unwrap_or(0),
-                gemini_response
-                    .usage_metadata
-                    .as_ref()
-                    .and_then(|m| m.candidates_token_count)
-                    .unwrap_or(0),
-            );
-
-            let completion = TextCompletion {
-                text: text.to_string(),
-                reasoning_text: None,
-                finish_reason,
-                usage,
-            };
-
-            return Ok(completion);
+        // TODO: Get rid of the cloning here.
+        if let Some(reason) = candidate.finish_reason.clone() {
+            finish_reason = ChatFinishReason::from(reason);
         }
 
-        // If we get here, we don't have text or function call
-        Err(AIError::ApiError(
-            "Response contained no text or function call".to_string(),
-        ))
+        let usage = LanguageModelUsage::try_from(gemini_response.usage_metadata)?;
+
+        let completion = TextCompletion {
+            text: text.to_string(),
+            finish_reason,
+            usage,
+        };
+
+        Ok(completion)
     }
 
     async fn stream_text<'a>(
@@ -304,9 +252,7 @@ impl Provider for GeminiProvider {
         contents.push(Content {
             role: Role::User,
             parts: vec![Part {
-                text: Some(prompt.to_string()),
-                function_call: None,
-                inline_data: None,
+                text: prompt.to_string(),
             }],
         });
 
@@ -362,7 +308,6 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
     if chunk_str.trim().is_empty() {
         return Ok(TextStream {
             text: String::new(),
-            reasoning_text: None,
             finish_reason: ChatFinishReason::Unknown,
             usage: None,
         });
@@ -376,17 +321,17 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
         if data == "[DONE]" {
             return Ok(TextStream {
                 text: String::new(),
-                reasoning_text: None,
                 finish_reason: chat::FinishReason::Stop,
                 usage: Some(chat::calculate_language_model_usage(0, 0)),
             });
         }
 
-        let chunk = serde_json::from_str::<StreamResponseChunk>(data)
+        let chunk = serde_json::from_str::<GenerateContentResponse>(data)
             .map_err(|e| AIError::ConversionError(format!("Invalid JSON: {}", e)))?;
 
-        if !chunk.candidates.is_empty() && !chunk.candidates[0].content.is_empty() {
-            let text = chunk.candidates[0].content[0].parts[0].text.to_string();
+        if !chunk.candidates.is_empty() && !chunk.candidates[0].content.parts.is_empty() {
+            let text = chunk.candidates[0].content.parts[0].text.to_string();
+
             let mut finish_reason = ChatFinishReason::Unknown;
 
             // TODO: Get rid of the cloning here.
@@ -394,32 +339,13 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
                 finish_reason = ChatFinishReason::from(reason);
             }
 
-            let usage = match chunk.usage_metadata {
-                Some(usage) => {
-                    match (
-                        usage.prompt_token_count,
-                        usage.candidates_token_count,
-                        usage.total_token_count,
-                    ) {
-                        (Some(prompt_tokens), Some(completion_tokens), None) => Some(
-                            chat::calculate_language_model_usage(prompt_tokens, completion_tokens),
-                        ),
-                        (Some(prompt_tokens), Some(completion_tokens), Some(total_tokens)) => {
-                            Some(LanguageModelUsage {
-                                prompt_tokens,
-                                completion_tokens,
-                                total_tokens,
-                            })
-                        }
-                        _ => None,
-                    }
-                }
-                None => None,
+            let usage = match LanguageModelUsage::try_from(chunk.usage_metadata) {
+                Ok(result) => Some(result),
+                Err(_) => None,
             };
 
             return Ok(TextStream {
                 text,
-                reasoning_text: None,
                 finish_reason,
                 usage,
             });
@@ -428,7 +354,6 @@ fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
     // handle empty or male-formatted chunk
     Ok(TextStream {
         text: String::new(),
-        reasoning_text: None,
         finish_reason: chat::FinishReason::Other,
         usage: Some(chat::calculate_language_model_usage(0, 0)),
     })
@@ -453,30 +378,6 @@ impl From<FinishReason> for ChatFinishReason {
     }
 }
 
-impl TryFrom<UsageMetadata> for LanguageModelUsage {
-    type Error = AIError;
-
-    fn try_from(value: UsageMetadata) -> Result<Self, Self::Error> {
-        let prompt_tokens = value
-            .prompt_token_count
-            .ok_or_else(|| AIError::ConversionError("Missing prompt token count".to_string()))?;
-
-        let completion_tokens = value.candidates_token_count.ok_or_else(|| {
-            AIError::ConversionError("Missing completion token count".to_string())
-        })?;
-
-        let total_tokens = value
-            .total_token_count
-            .unwrap_or(prompt_tokens + completion_tokens);
-
-        Ok(LanguageModelUsage {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens,
-        })
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Role {
@@ -484,48 +385,20 @@ enum Role {
     Model,
 }
 
+/// !INCOMPLETE!
+/// Containing media that is part of a multi-part Content message
+///
+///[Google API Docs](https://ai.google.dev/api/caching#Part)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Part {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    text: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    function_call: Option<FunctionCall>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    inline_data: Option<InlineData>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FunctionCall {
-    name: String,
-    args: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FunctionResponse {
-    name: String,
-    response: FunctionResponseContent,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FunctionResponseContent {
-    name: String,
-    content: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct InlineData {
-    mime_type: String,
-    data: String,
+    text: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Content {
-    role: Role,
     parts: Vec<Part>,
+    role: Role,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -555,22 +428,21 @@ struct Response {
     prompt_feedback: Option<PromptFeedback>,
     #[serde(default)]
     usage_metadata: Option<UsageMetadata>,
+    #[serde(default)]
+    model_version: Option<String>,
 }
 
+/// !INCOMPLETE!
+/// A response candidate generated from the model.
+///
+///[Google API Docs](https://ai.google.dev/api/generate-content#v1beta.Candidate)
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Candidate {
     content: Content,
-    #[serde(default)]
-    finish_reason: Option<String>,
-    #[serde(default)]
-    index: Option<i32>,
-    #[serde(default)]
-    safety_ratings: Option<Vec<SafetyRating>>,
-    #[serde(default)]
-    grounding_metadata: Option<GroundingMetadata>,
-    #[serde(default)]
-    avg_logprobs: Option<f32>,
+    /// If this is `None` the model hasn't stopped generating tokens yet.
+    finish_reason: Option<FinishReason>,
+    token_count: Option<i32>,
 }
 
 impl TryFrom<Candidate> for TextCompletion {
@@ -584,33 +456,21 @@ impl TryFrom<Candidate> for TextCompletion {
             ));
         }
 
-        if let Some(text) = &candidate.content.parts[0].text {
-            // Extract finish reason
-            let finish_reason = match &candidate.finish_reason {
-                Some(reason) => match reason.as_str() {
-                    "STOP" => ChatFinishReason::Stop,
-                    "MAX_TOKENS" => ChatFinishReason::Length,
-                    "SAFETY" => ChatFinishReason::ContentFilter("Safety".to_string()),
-                    "RECITATION" => ChatFinishReason::Other,
-                    "TOOL_CALLS" => ChatFinishReason::ToolCalls,
-                    "ERROR" => ChatFinishReason::Error,
-                    _ => ChatFinishReason::Unknown,
-                },
-                None => ChatFinishReason::Unknown,
-            };
+        // Extract finish reason
+        let finish_reason = match &candidate.finish_reason {
+            // TODO: Fix clone here
+            Some(reason) => ChatFinishReason::from(reason.clone()),
+            None => ChatFinishReason::Unknown,
+        };
 
-            // Create default usage that will be updated later with proper values
-            let completion = TextCompletion {
-                text: text.to_string(),
-                reasoning_text: None,
-                finish_reason,
-                usage: calculate_language_model_usage(0, 0),
-            };
+        // Create default usage that will be updated later with proper values
+        let completion = TextCompletion {
+            text: candidate.content.parts[0].text.to_string(),
+            finish_reason,
+            usage: calculate_language_model_usage(0, 0),
+        };
 
-            return Ok(completion);
-        }
-
-        Err(AIError::ApiError("Response contained no text".to_string()))
+        Ok(completion)
     }
 }
 
@@ -618,11 +478,24 @@ impl TryFrom<Candidate> for TextCompletion {
 #[serde(rename_all = "camelCase")]
 struct PromptFeedback {
     #[serde(default)]
-    safety_ratings: Option<Vec<SafetyRating>>,
+    block_reason: Option<BlockReason>,
     #[serde(default)]
-    block_reason: Option<String>,
+    safety_ratings: Option<Vec<SafetyRating>>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum BlockReason {
+    #[serde(rename = "BLOCK_REASON_UNSPECIFIED")]
+    Unspecified,
+    Safety,
+    Other,
+    Blocklist,
+    ProhibitedContent,
+    ImageSafety,
+}
+
+/// TODO: add missing fields https://ai.google.dev/api/generate-content#UsageMetadata
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UsageMetadata {
@@ -634,17 +507,12 @@ struct UsageMetadata {
     total_token_count: Option<i32>,
 }
 
+/// TODO: add category and probability https://ai.google.dev/api/generate-content#v1beta.SafetyRating
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SafetyRating {
     category: String,
     probability: String,
-    #[serde(default)]
-    probability_score: Option<f32>,
-    #[serde(default)]
-    severity: Option<String>,
-    #[serde(default)]
-    severity_score: Option<f32>,
     #[serde(default)]
     blocked: Option<bool>,
 }
@@ -841,16 +709,12 @@ enum FunctionCallingMode {
 }
 
 #[derive(Debug, Deserialize)]
-struct StreamResponseChunk {
-    candidates: Vec<StreamResponseCandidate>,
-    usage_metadata: Option<UsageMetadata>,
-}
-
-#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StreamResponseCandidate {
-    content: Vec<StreamResponseContent>,
-    finish_reason: Option<FinishReason>,
+struct GenerateContentResponse {
+    candidates: Vec<Candidate>,
+    prompt_feedback: Option<PromptFeedback>,
+    usage_metadata: UsageMetadata,
+    model_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -991,11 +855,33 @@ impl TryFrom<ChatMessage> for Content {
 
         Ok(Content {
             role,
-            parts: vec![Part {
-                text: Some(msg.content),
-                function_call: None,
-                inline_data: None,
-            }],
+            parts: vec![Part { text: msg.content }],
         })
+    }
+}
+
+impl TryFrom<UsageMetadata> for LanguageModelUsage {
+    type Error = AIError;
+
+    fn try_from(value: UsageMetadata) -> Result<Self, Self::Error> {
+        match (
+            value.prompt_token_count,
+            value.candidates_token_count,
+            value.total_token_count,
+        ) {
+            (Some(prompt_tokens), None, None) => Ok(LanguageModelUsage {
+                prompt_tokens,
+                completion_tokens: 0,
+                total_tokens: prompt_tokens,
+            }),
+            (Some(prompt_tokens), Some(completion_tokens), _) => Ok(LanguageModelUsage {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: prompt_tokens + completion_tokens,
+            }),
+            _ => Err(AIError::ConversionError(
+                "Missing token usage metadata".to_string(),
+            )),
+        }
     }
 }

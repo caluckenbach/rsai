@@ -19,15 +19,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let provider = GeminiProvider::default(&api_key);
 
     // Create Gemini-specific settings
-    let gemini_settings = GeminiSettings::new()
-        .use_search_grounding(true)
-        .into_provider_options();
+    let gemini_settings = GeminiSettings::new().into_provider_options();
 
     // Create chat settings with a system message
     let settings = ChatSettings::new()
         .system_prompt("You are a helpful assistant that provides detailed, thoughtful answers.")
-        .temperature(0.7)
-        .max_tokens(1024)
         .provider_options(gemini_settings);
 
     // Create the chat model with the provider and settings
@@ -51,7 +47,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 // If this is the last chunk, print usage statistics
                 if let Some(usage) = chunk.usage {
-                    if chunk.text.is_empty() && !matches!(chunk.finish_reason, ai::model::chat::FinishReason::Unknown) {
+                    if chunk.text.is_empty()
+                        && !matches!(chunk.finish_reason, ai::model::chat::FinishReason::Unknown)
+                    {
                         println!("\n\nCompletion finished. Usage statistics:");
                         println!("  Prompt tokens: {}", usage.prompt_tokens);
                         println!("  Completion tokens: {}", usage.completion_tokens);
@@ -59,7 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         println!("  Finish reason: {:?}", chunk.finish_reason);
                     }
                 }
-            },
+            }
             Err(e) => {
                 eprintln!("\nError during streaming: {}", e);
                 break;

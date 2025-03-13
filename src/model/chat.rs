@@ -153,7 +153,7 @@ impl Clone for Box<dyn ProviderOptions> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextCompletion {
     pub text: String,
-    pub reasoning_text: Option<String>,
+    //pub reasoning_text: Option<String>,
     //pub reasoning:
     //pub sources:
     pub finish_reason: FinishReason,
@@ -167,7 +167,7 @@ pub struct TextCompletion {
 #[derive(Debug)]
 pub struct TextStream {
     pub text: String,
-    pub reasoning_text: Option<String>,
+    //pub reasoning_text: Option<String>,
     pub finish_reason: FinishReason,
     pub usage: Option<LanguageModelUsage>,
 }
@@ -229,7 +229,6 @@ mod tests {
                 last_settings: Arc::new(Mutex::new(None)),
                 response: TextCompletion {
                     text: String::new(),
-                    reasoning_text: None,
                     finish_reason: FinishReason::Error,
                     usage: LanguageModelUsage {
                         prompt_tokens: 0,
@@ -257,7 +256,6 @@ mod tests {
 
             Ok(TextCompletion {
                 text: self.response.text.clone(),
-                reasoning_text: self.response.reasoning_text.clone(),
                 finish_reason: self.response.finish_reason.clone(),
                 usage: LanguageModelUsage {
                     prompt_tokens: self.response.usage.prompt_tokens,
@@ -283,7 +281,6 @@ mod tests {
             let stream = futures::stream::once(async move {
                 Ok(TextStream {
                     text: self.response.text.clone(),
-                    reasoning_text: self.response.reasoning_text.clone(),
                     finish_reason: self.response.finish_reason.clone(),
                     usage: Some(LanguageModelUsage {
                         prompt_tokens: self.response.usage.prompt_tokens,
@@ -380,7 +377,6 @@ mod tests {
     async fn test_chat_model_generate_text() {
         let expected_response = TextCompletion {
             text: "Hello, human!".to_string(),
-            reasoning_text: None,
             finish_reason: FinishReason::Stop,
             usage: LanguageModelUsage {
                 prompt_tokens: 10,
@@ -438,7 +434,6 @@ mod tests {
     async fn test_mock_provider_stream_text() {
         let expected_response = TextCompletion {
             text: "Streaming response".to_string(),
-            reasoning_text: Some("Test reasoning".to_string()),
             finish_reason: FinishReason::Stop,
             usage: LanguageModelUsage {
                 prompt_tokens: 10,
@@ -465,7 +460,6 @@ mod tests {
         // Verify the chunk content
         let chunk = text_chunks[0].as_ref().unwrap();
         assert_eq!(chunk.text, "Streaming response");
-        assert_eq!(chunk.reasoning_text, Some("Test reasoning".to_string()));
         assert_eq!(chunk.finish_reason, FinishReason::Stop);
 
         // Verify usage metrics
@@ -506,7 +500,6 @@ mod tests {
     async fn test_chat_model_stream_text() {
         let expected_response = TextCompletion {
             text: "Streaming content".to_string(),
-            reasoning_text: None,
             finish_reason: FinishReason::Stop,
             usage: LanguageModelUsage {
                 prompt_tokens: 5,
@@ -526,22 +519,23 @@ mod tests {
         let chat_model = ChatModel::new(provider, chat_settings);
 
         let stream_result = chat_model.stream_text("Tell me a story").await.unwrap();
-        let text_chunks: Vec<Result<TextStream, AIError>> = futures::StreamExt::collect(stream_result).await;
+        let text_chunks: Vec<Result<TextStream, AIError>> =
+            futures::StreamExt::collect(stream_result).await;
 
         // Check that we got exactly one chunk
         assert_eq!(text_chunks.len(), 1);
-        
+
         // Verify the chunk content
         let chunk = text_chunks[0].as_ref().unwrap();
         assert_eq!(chunk.text, "Streaming content");
         assert_eq!(chunk.finish_reason, FinishReason::Stop);
-        
+
         // Verify usage metrics
         let usage = chunk.usage.as_ref().unwrap();
         assert_eq!(usage.prompt_tokens, 5);
         assert_eq!(usage.completion_tokens, 15);
         assert_eq!(usage.total_tokens, 20);
-        
+
         // Check that the provider was called with the correct arguments
         let captured_prompt = prompt_tracker.lock().unwrap();
         assert_eq!(*captured_prompt, Some("Tell me a story".to_string()));
