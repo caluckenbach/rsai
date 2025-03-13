@@ -37,9 +37,6 @@ pub struct ChatSettings {
     pub temperature: Option<f32>,
     pub stop_sequences: Option<Vec<String>>,
     pub seed: Option<i32>,
-    pub max_retries: Option<i32>,
-    // TODO: add abort signal
-    // TODO: hide this implementation detail
     pub headers: reqwest::header::HeaderMap,
     pub provider_options: Option<Box<dyn ProviderOptions>>,
 }
@@ -53,7 +50,6 @@ impl Default for ChatSettings {
             temperature: None,
             stop_sequences: None,
             seed: None,
-            max_retries: None,
             headers: reqwest::header::HeaderMap::new(),
             provider_options: None,
         }
@@ -104,11 +100,6 @@ impl ChatSettings {
 
     pub fn seed(mut self, seed: i32) -> Self {
         self.seed = Some(seed);
-        self
-    }
-
-    pub fn max_retries(mut self, max_retries: i32) -> Self {
-        self.max_retries = Some(max_retries);
         self
     }
 

@@ -1,14 +1,9 @@
-// Remove this in the future
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{self, Value};
-use std::collections::HashMap;
 use std::str::from_utf8;
 
 use crate::AIError;
@@ -299,19 +294,6 @@ struct Request {
     safety_settings: Option<Vec<SafetySetting>>,
 }
 
-// Response structs for parsing Gemini API responses
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Response {
-    candidates: Vec<Candidate>,
-    #[serde(default)]
-    prompt_feedback: Option<PromptFeedback>,
-    #[serde(default)]
-    usage_metadata: Option<UsageMetadata>,
-    #[serde(default)]
-    model_version: Option<String>,
-}
-
 /// !INCOMPLETE!
 /// A response candidate generated from the model.
 ///
@@ -368,116 +350,27 @@ struct SafetyRating {
     blocked: Option<bool>,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GroundingMetadata {
-    #[serde(default)]
-    web_search_queries: Option<Vec<String>>,
-    #[serde(default)]
-    retrieval_queries: Option<Vec<String>>,
-    #[serde(default)]
-    search_entry_point: Option<SearchEntryPoint>,
-    #[serde(default)]
-    grounding_chunks: Option<Vec<GroundingChunk>>,
-    #[serde(default)]
-    grounding_supports: Option<Vec<GroundingSupport>>,
-    #[serde(default)]
-    retrieval_metadata: Option<RetrievalMetadata>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SearchEntryPoint {
-    rendered_content: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GroundingChunk {
-    #[serde(default)]
-    web: Option<WebSource>,
-    #[serde(default)]
-    retrieved_context: Option<RetrievedContext>,
-}
-
-#[derive(Debug, Deserialize)]
-struct WebSource {
-    uri: String,
-    #[serde(default)]
-    title: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RetrievedContext {
-    uri: String,
-    #[serde(default)]
-    title: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct GroundingSupport {
-    segment: Segment,
-    #[serde(default)]
-    segment_text: Option<String>,
-    #[serde(default)]
-    grounding_chunk_indices: Option<Vec<i32>>,
-    #[serde(default)]
-    support_chunk_indices: Option<Vec<i32>>,
-    #[serde(default)]
-    confidence_scores: Option<Vec<f32>>,
-    #[serde(default)]
-    confidence_score: Option<Vec<f32>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Segment {
-    #[serde(default)]
-    start_index: Option<i32>,
-    #[serde(default)]
-    end_index: Option<i32>,
-    #[serde(default)]
-    text: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RetrievalMetadata {
-    #[serde(default)]
-    web_dynamic_retrieval_score: Option<f32>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SystemInstruction {
     parts: Vec<Part>,
 }
 
+/// Configuration options for model generation and outputs.
+///
+/// Not all parameters are configurable for every model.
+///
+/// [Google API Docs](https://ai.google.dev/api/generate-content#generationconfig)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GenerationConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stop_sequences: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<i32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_k: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    frequency_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    presence_penalty: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    stop_sequences: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     seed: Option<i32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    response_mime_type: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    response_schema: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    audio_timestamp: Option<bool>,
 }
 
 impl From<ChatSettings> for Option<GenerationConfig> {
@@ -493,15 +386,8 @@ impl From<ChatSettings> for Option<GenerationConfig> {
         Some(GenerationConfig {
             max_output_tokens: settings.max_tokens,
             temperature: settings.temperature,
-            top_p: None,
-            top_k: None,
-            frequency_penalty: None,
-            presence_penalty: None,
             stop_sequences: settings.stop_sequences.clone(),
             seed: settings.seed,
-            response_mime_type: None,
-            response_schema: None,
-            audio_timestamp: None,
         })
     }
 }
@@ -543,48 +429,6 @@ pub enum HarmBlockThreshold {
     BlockNone,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Tools {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    function_declarations: Option<Vec<FunctionDeclaration>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    google_search: Option<HashMap<String, Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    google_search_retrieval: Option<HashMap<String, Value>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct FunctionDeclaration {
-    name: String,
-    #[serde(skip_serializing_if = "String::is_empty")]
-    description: String,
-    parameters: Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ToolConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    function_calling_config: Option<FunctionCallingConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FunctionCallingConfig {
-    mode: FunctionCallingMode,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    allowed_function_names: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum FunctionCallingMode {
-    Auto,
-    None,
-    Any,
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct GenerateContentResponse {
@@ -610,17 +454,6 @@ enum FinishReason {
     Spii,
     MalformedFunctionCall,
     ImageSafety,
-}
-
-#[derive(Debug, Deserialize)]
-struct StreamResponseContent {
-    parts: Vec<StreamResponsePart>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StreamResponsePart {
-    text: String,
-    role: Role,
 }
 
 /// Gemini Provider specific settings
