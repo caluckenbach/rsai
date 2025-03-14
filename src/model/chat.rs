@@ -1,4 +1,6 @@
 use reqwest::header;
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use std::any::Any;
 use std::fmt::Debug;
 
@@ -27,6 +29,16 @@ impl<P: Provider> ChatModel<P> {
     ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
         self.provider.stream_text(prompt, &self.settings).await
     }
+
+    pub async fn generate_object<T: DeserializeOwned>(
+        &self,
+        prompt: &str,
+        parameters: &StructuredOutputParameters<T>,
+    ) -> Result<StructuredOutput<T>, AIError> {
+        self.provider
+            .generate_object(prompt, &self.settings, parameters)
+            .await
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +66,44 @@ pub struct ChatSettings {
 
     /// Provider-specific options.
     pub provider_options: Option<Box<dyn ProviderOptions>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct StructuredOutputParameters<T: DeserializeOwned> {
+    pub output: OutputType,
+    pub mode: Option<Mode>,
+    pub schema: Option<T>,
+    pub schema_name: Option<String>,
+    pub schema_description: Option<String>,
+    pub enum_values: Option<Vec<String>>,
+}
+
+pub struct StructuredOutput<T: DeserializeOwned> {
+    pub value: StructuredResult<T>,
+    pub finish_reason: FinishReason,
+    pub usage: LanguageModelUsage,
+}
+
+pub enum StructuredResult<T> {
+    Object(T),
+    Array(Vec<T>),
+    Enum(String),
+    NoSchema(Value),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum OutputType {
+    Object,
+    Array,
+    Enum,
+    NoSchema,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Mode {
+    Auto,
+    Json,
+    Tool,
 }
 
 /// Temperature setting.
