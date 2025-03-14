@@ -1,5 +1,8 @@
 use ai::{
-    model::{ChatSettings, chat::ChatModel},
+    model::{
+        ChatSettings,
+        chat::{ChatModel, Temperature},
+    },
     provider::gemini::{GeminiProvider, GeminiSettings},
 };
 use dotenv::dotenv;
@@ -22,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create chat settings with a system message
     let settings = ChatSettings::new()
         .system_prompt("You are a helpful assistant that provides concise answers.")
-        .temperature(0.7)
+        .temperature(Temperature::new(0.7))
         .max_tokens(1024)
         .provider_options(gemini_settings);
 

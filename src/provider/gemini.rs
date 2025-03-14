@@ -8,9 +8,7 @@ use std::str::from_utf8;
 
 use crate::AIError;
 use crate::model::chat;
-use crate::model::chat::FinishReason as ChatFinishReason;
-use crate::model::chat::LanguageModelUsage;
-use crate::model::chat::Temperature;
+use crate::model::chat::{LanguageModelUsage, Temperature};
 use crate::model::{ChatRole, ChatSettings, Message, TextCompletion, TextStream};
 
 use super::Provider;
@@ -43,45 +41,6 @@ impl GeminiProvider {
     fn get_model_url(&self) -> String {
         format!("{}{}", API_BASE_URL, self.model)
     }
-}
-
-/// Builds the request payload for the Gemini API
-fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIError> {
-    let mut contents = Vec::new();
-
-    if let Some(messages) = &settings.messages {
-        for msg in messages {
-            let content = Content::try_from(msg.clone())?;
-            contents.push(content);
-        }
-    }
-
-    contents.push(Content {
-        role: Role::User,
-        parts: vec![Part {
-            text: prompt.to_string(),
-        }],
-    });
-
-    let system_instruction = settings
-        .system_prompt
-        .as_ref()
-        .map(|prompt| SystemInstruction {
-            parts: vec![Part {
-                text: prompt.to_string(),
-            }],
-        });
-
-    let generation_config = Option::<GenerationConfig>::from(settings.clone());
-    let provider_settings = Option::<GeminiSettings>::from(settings.clone());
-    let safety_settings = provider_settings.and_then(|s| s.safety_settings.clone());
-
-    Ok(Request {
-        contents,
-        system_instruction,
-        generation_config,
-        safety_settings,
-    })
 }
 
 #[async_trait]
@@ -134,12 +93,12 @@ impl Provider for GeminiProvider {
         let finish_reason = candidate
             .finish_reason
             .clone()
-            .map_or(ChatFinishReason::Unknown, ChatFinishReason::from);
+            .map_or(chat::FinishReason::Unknown, from_provider_finish_reason);
 
-        let usage = LanguageModelUsage::try_from(parsed_response.usage_metadata)?;
+        let usage = from_provider_usage(parsed_response.usage_metadata)?;
 
         Ok(TextCompletion {
-            text: text.to_string(),
+            text,
             finish_reason,
             usage,
         })
@@ -185,78 +144,94 @@ impl Provider for GeminiProvider {
     }
 }
 
-/// Parses an SSE chunk into a `TextStream`
-fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
-    let chunk_str = from_utf8(&bytes)
-        .map_err(|e| AIError::ConversionError(format!("Invalid UTF-8 in SSE chunk: {}", e)))?
-        .trim();
+/// Gemini Provider specific settings
+#[derive(Debug, Clone, Default)]
+pub struct GeminiSettings {
+    /// Optional. The name of the cached content used as context to serve the prediction.
+    /// Format: cachedContents/{cachedContent}
+    pub cached_content: Option<String>,
 
-    if chunk_str.is_empty() {
-        return Ok(TextStream {
-            text: String::new(),
-            finish_reason: ChatFinishReason::Unknown,
-            usage: None,
-        });
-    }
+    /// Optional. Enable structured output. Default is true.
+    ///
+    /// This is useful when the JSON Schema contains elements that are
+    /// not supported by the OpenAPI schema version that
+    /// Google Generative AI uses. You can use this to disable
+    /// structured outputs if you need to.
+    pub structured_outputs: Option<bool>,
 
-    let Some(data) = chunk_str.strip_prefix("data: ") else {
-        return Ok(TextStream {
-            text: String::new(),
-            finish_reason: ChatFinishReason::Other,
-            usage: None,
-        });
-    };
+    /// Optional. A list of unique safety settings for blocking unsafe content.
+    pub safety_settings: Option<Vec<SafetySetting>>,
 
-    let data = data.trim();
-    if data == "[DONE]" {
-        return Ok(TextStream {
-            text: String::new(),
-            finish_reason: chat::FinishReason::Stop,
-            usage: None,
-        });
-    }
+    /// Optional. Enables timestamp understanding for audio-only files.
+    pub audio_timestamp: Option<bool>,
 
-    let chunk = serde_json::from_str::<GenerateContentResponse>(data)
-        .map_err(|e| AIError::ConversionError(format!("Invalid JSON: {}", e)))?;
-
-    if chunk.candidates.is_empty() || chunk.candidates[0].content.parts.is_empty() {
-        return Ok(TextStream {
-            text: String::new(),
-            finish_reason: ChatFinishReason::Other,
-            usage: None,
-        });
-    }
-
-    let text = chunk.candidates[0].content.parts[0].text.clone();
-    let finish_reason = chunk.candidates[0]
-        .finish_reason
-        .clone()
-        .map_or(ChatFinishReason::Unknown, ChatFinishReason::from);
-    let usage = LanguageModelUsage::try_from(chunk.usage_metadata).ok();
-
-    Ok(TextStream {
-        text,
-        finish_reason,
-        usage,
-    })
+    /// Optional. When enabled, the model will use Google search to ground the response.
+    pub use_search_grounding: Option<bool>,
 }
 
-impl From<FinishReason> for ChatFinishReason {
-    fn from(finish_reason: FinishReason) -> Self {
-        match finish_reason {
-            FinishReason::Unspecified => ChatFinishReason::Unknown,
-            FinishReason::Stop => ChatFinishReason::Stop,
-            FinishReason::MaxTokens => ChatFinishReason::Length,
-            FinishReason::Safety => ChatFinishReason::ContentFilter("The response candidate content was flagged for safety reasons.".to_string()),
-            FinishReason::Recitation => ChatFinishReason::ContentFilter("The response candidate content was flagged for recitation reasons.".to_string()),
-            FinishReason::Language => ChatFinishReason::Other,
-            FinishReason::Other => ChatFinishReason::Other,
-            FinishReason::Blocklist => ChatFinishReason::ContentFilter("Token generation stopped because the content contains forbidden terms.".to_string()),
-            FinishReason::ProhibitedContent => ChatFinishReason::ContentFilter("Token generation stopped for potentially containing prohibited content.".to_string()),
-            FinishReason::Spii => ChatFinishReason::ContentFilter("Token generation stopped because the content potentially contains Sensitive Personally Identifiable Information (SPII).".to_string()),
-            FinishReason::MalformedFunctionCall => ChatFinishReason::Error,
-            FinishReason::ImageSafety => ChatFinishReason::ContentFilter("Token generation stopped because generated images contain safety violations.".to_string()),
-        }
+impl GeminiSettings {
+    /// Create a new GeminiSettings instance
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set cached content
+    pub fn cached_content(mut self, cached_content: impl Into<String>) -> Self {
+        self.cached_content = Some(cached_content.into());
+        self
+    }
+
+    /// Enable or disable structured outputs
+    pub fn structured_outputs(mut self, enabled: bool) -> Self {
+        self.structured_outputs = Some(enabled);
+        self
+    }
+
+    /// Set safety settings
+    pub fn safety_settings(mut self, settings: Vec<SafetySetting>) -> Self {
+        self.safety_settings = Some(settings);
+        self
+    }
+
+    /// Add a single safety setting
+    pub fn add_safety_setting(
+        mut self,
+        category: SafetyCategory,
+        threshold: HarmBlockThreshold,
+    ) -> Self {
+        let settings = self.safety_settings.get_or_insert_with(Vec::new);
+        settings.push(SafetySetting {
+            category,
+            threshold,
+        });
+        self
+    }
+
+    /// Enable or disable audio timestamp
+    pub fn audio_timestamp(mut self, enabled: bool) -> Self {
+        self.audio_timestamp = Some(enabled);
+        self
+    }
+
+    /// Enable or disable search grounding
+    pub fn use_search_grounding(mut self, enabled: bool) -> Self {
+        self.use_search_grounding = Some(enabled);
+        self
+    }
+
+    /// Convert to a Box<dyn ProviderOptions> for use with ChatSettings
+    pub fn into_provider_options(self) -> Box<dyn crate::model::chat::ProviderOptions> {
+        Box::new(self)
+    }
+}
+
+impl chat::ProviderOptions for GeminiSettings {
+    fn clone_box(&self) -> Box<dyn crate::model::chat::ProviderOptions> {
+        Box::new(self.clone())
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 
@@ -372,30 +347,6 @@ struct GenerationConfig {
     temperature: Option<f32>,
 }
 
-impl From<ChatSettings> for Option<GenerationConfig> {
-    fn from(settings: ChatSettings) -> Self {
-        // Early return if no generation config parameters are set
-        if settings.max_tokens.is_none()
-            && settings.temperature.is_none()
-            && settings.stop_sequences.is_none()
-        {
-            return None;
-        }
-
-        // Map Temperature enum to Gemini's temperature scale [0.0-2.0]
-        let temperature = settings.temperature.map(|temp| match temp {
-            Temperature::Raw(val) => val,
-            Temperature::Normalized(val) => val * 2.0,
-        });
-
-        Some(GenerationConfig {
-            max_output_tokens: settings.max_tokens,
-            temperature,
-            stop_sequences: settings.stop_sequences.clone(),
-        })
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SafetySetting {
     pub category: SafetyCategory,
@@ -460,152 +411,188 @@ enum FinishReason {
     ImageSafety,
 }
 
-/// Gemini Provider specific settings
-#[derive(Debug, Clone, Default)]
-pub struct GeminiSettings {
-    /// Optional. The name of the cached content used as context to serve the prediction.
-    /// Format: cachedContents/{cachedContent}
-    pub cached_content: Option<String>,
+/// Builds the request payload for the Gemini API
+fn build_request(prompt: &str, settings: &ChatSettings) -> Result<Request, AIError> {
+    let mut contents = Vec::new();
 
-    /// Optional. Enable structured output. Default is true.
-    ///
-    /// This is useful when the JSON Schema contains elements that are
-    /// not supported by the OpenAPI schema version that
-    /// Google Generative AI uses. You can use this to disable
-    /// structured outputs if you need to.
-    pub structured_outputs: Option<bool>,
-
-    /// Optional. A list of unique safety settings for blocking unsafe content.
-    pub safety_settings: Option<Vec<SafetySetting>>,
-
-    /// Optional. Enables timestamp understanding for audio-only files.
-    pub audio_timestamp: Option<bool>,
-
-    /// Optional. When enabled, the model will use Google search to ground the response.
-    pub use_search_grounding: Option<bool>,
-}
-
-impl GeminiSettings {
-    /// Create a new GeminiSettings instance
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set cached content
-    pub fn cached_content(mut self, cached_content: impl Into<String>) -> Self {
-        self.cached_content = Some(cached_content.into());
-        self
-    }
-
-    /// Enable or disable structured outputs
-    pub fn structured_outputs(mut self, enabled: bool) -> Self {
-        self.structured_outputs = Some(enabled);
-        self
-    }
-
-    /// Set safety settings
-    pub fn safety_settings(mut self, settings: Vec<SafetySetting>) -> Self {
-        self.safety_settings = Some(settings);
-        self
-    }
-
-    /// Add a single safety setting
-    pub fn add_safety_setting(
-        mut self,
-        category: SafetyCategory,
-        threshold: HarmBlockThreshold,
-    ) -> Self {
-        let settings = self.safety_settings.get_or_insert_with(Vec::new);
-        settings.push(SafetySetting {
-            category,
-            threshold,
-        });
-        self
-    }
-
-    /// Enable or disable audio timestamp
-    pub fn audio_timestamp(mut self, enabled: bool) -> Self {
-        self.audio_timestamp = Some(enabled);
-        self
-    }
-
-    /// Enable or disable search grounding
-    pub fn use_search_grounding(mut self, enabled: bool) -> Self {
-        self.use_search_grounding = Some(enabled);
-        self
-    }
-
-    /// Convert to a Box<dyn ProviderOptions> for use with ChatSettings
-    pub fn into_provider_options(self) -> Box<dyn crate::model::chat::ProviderOptions> {
-        Box::new(self)
-    }
-}
-
-impl From<ChatSettings> for Option<GeminiSettings> {
-    fn from(settings: ChatSettings) -> Self {
-        settings
-            .provider_options
-            .as_ref()
-            .and_then(move |options| options.as_any().downcast_ref::<GeminiSettings>())
-            .cloned()
-    }
-}
-
-impl crate::model::chat::ProviderOptions for GeminiSettings {
-    fn clone_box(&self) -> Box<dyn crate::model::chat::ProviderOptions> {
-        Box::new(self.clone())
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-}
-
-impl TryFrom<Message> for Content {
-    type Error = AIError;
-
-    fn try_from(msg: Message) -> Result<Self, Self::Error> {
-        let role = match msg.role {
-            // System messages are handled separately via SystemInstruction
-            ChatRole::System => {
-                return Err(AIError::UnsupportedFunctionality(
-                    "system messages should be set in ChatSettings.system_prompt, not in messages"
-                        .to_string(),
-                ));
-            }
-            ChatRole::User => Role::User,
-            ChatRole::Assistant => Role::Model,
-        };
-
-        Ok(Content {
-            role,
-            parts: vec![Part { text: msg.content }],
-        })
-    }
-}
-
-impl TryFrom<UsageMetadata> for LanguageModelUsage {
-    type Error = AIError;
-
-    fn try_from(value: UsageMetadata) -> Result<Self, Self::Error> {
-        match (
-            value.prompt_token_count,
-            value.candidates_token_count,
-            value.total_token_count,
-        ) {
-            (Some(prompt_tokens), None, None) => Ok(LanguageModelUsage {
-                prompt_tokens,
-                completion_tokens: 0,
-                total_tokens: prompt_tokens,
-            }),
-            (Some(prompt_tokens), Some(completion_tokens), _) => Ok(LanguageModelUsage {
-                prompt_tokens,
-                completion_tokens,
-                total_tokens: prompt_tokens + completion_tokens,
-            }),
-            _ => Err(AIError::ConversionError(
-                "Missing token usage metadata".to_string(),
-            )),
+    if let Some(messages) = &settings.messages {
+        for msg in messages {
+            let content = to_content(msg.clone())?;
+            contents.push(content);
         }
+    }
+
+    contents.push(Content {
+        role: Role::User,
+        parts: vec![Part {
+            text: prompt.to_string(),
+        }],
+    });
+
+    let system_instruction = settings
+        .system_prompt
+        .clone()
+        .map(|prompt| SystemInstruction {
+            parts: vec![Part { text: prompt }],
+        });
+
+    let generation_config = to_generation_config(settings);
+    let safety_settings = to_provider_settings(settings).and_then(|s| s.safety_settings);
+
+    Ok(Request {
+        contents,
+        system_instruction,
+        generation_config,
+        safety_settings,
+    })
+}
+
+/// Parses an SSE chunk into a `TextStream`
+fn parse_sse_chunk(bytes: Bytes) -> Result<TextStream, AIError> {
+    let chunk_str = from_utf8(&bytes)
+        .map_err(|e| AIError::ConversionError(format!("Invalid UTF-8 in SSE chunk: {}", e)))?
+        .trim();
+
+    if chunk_str.is_empty() {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Unknown,
+            usage: None,
+        });
+    }
+
+    let Some(data) = chunk_str.strip_prefix("data: ") else {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Other,
+            usage: None,
+        });
+    };
+
+    let data = data.trim();
+    if data == "[DONE]" {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Stop,
+            usage: None,
+        });
+    }
+
+    let chunk = serde_json::from_str::<GenerateContentResponse>(data)
+        .map_err(|e| AIError::ConversionError(format!("Invalid JSON: {}", e)))?;
+
+    if chunk.candidates.is_empty() || chunk.candidates[0].content.parts.is_empty() {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Other,
+            usage: None,
+        });
+    }
+
+    let text = chunk.candidates[0].content.parts[0].text.clone();
+    let finish_reason = chunk.candidates[0]
+        .finish_reason
+        .clone()
+        .map_or(chat::FinishReason::Unknown, from_provider_finish_reason);
+
+    let usage = from_provider_usage(chunk.usage_metadata).ok();
+
+    Ok(TextStream {
+        text,
+        finish_reason,
+        usage,
+    })
+}
+
+fn to_generation_config(settings: &ChatSettings) -> Option<GenerationConfig> {
+    // Early return if no generation config parameters are set
+    if settings.max_tokens.is_none()
+        && settings.temperature.is_none()
+        && settings.stop_sequences.is_none()
+    {
+        return None;
+    }
+
+    let temperature = settings.temperature.clone().map(to_provider_temperature);
+
+    Some(GenerationConfig {
+        max_output_tokens: settings.max_tokens,
+        temperature,
+        stop_sequences: settings.stop_sequences.clone(),
+    })
+}
+
+/// Map Temperature enum to Gemini's temperature scale [0.0-2.0]
+fn to_provider_temperature(temperature: Temperature) -> f32 {
+    match temperature {
+        Temperature::Raw(val) => val,
+        Temperature::Normalized(val) => val * 2.0,
+    }
+}
+
+fn to_provider_settings(settings: &ChatSettings) -> Option<GeminiSettings> {
+    settings
+        .provider_options
+        .as_ref()
+        .and_then(|options| options.as_any().downcast_ref::<GeminiSettings>())
+        .cloned()
+}
+
+fn to_content(message: Message) -> Result<Content, AIError> {
+    let role = match message.role {
+        // System messages are handled separately via SystemInstruction
+        ChatRole::System => {
+            return Err(AIError::UnsupportedFunctionality(
+                "system messages should be set in ChatSettings.system_prompt, not in messages"
+                    .to_string(),
+            ));
+        }
+        ChatRole::User => Role::User,
+        ChatRole::Assistant => Role::Model,
+    };
+
+    Ok(Content {
+        role,
+        parts: vec![Part {
+            text: message.content,
+        }],
+    })
+}
+
+fn from_provider_finish_reason(reason: FinishReason) -> chat::FinishReason {
+    match reason {
+            FinishReason::Unspecified => chat::FinishReason::Unknown,
+            FinishReason::Stop => chat::FinishReason::Stop,
+            FinishReason::MaxTokens => chat::FinishReason::Length,
+            FinishReason::Safety => chat::FinishReason::ContentFilter("The response candidate content was flagged for safety reasons.".to_string()),
+            FinishReason::Recitation => chat::FinishReason::ContentFilter("The response candidate content was flagged for recitation reasons.".to_string()),
+            FinishReason::Language =>chat::FinishReason::Other,
+            FinishReason::Other =>chat::FinishReason::Other,
+            FinishReason::Blocklist => chat::FinishReason::ContentFilter("Token generation stopped because the content contains forbidden terms.".to_string()),
+            FinishReason::ProhibitedContent => chat::FinishReason::ContentFilter("Token generation stopped for potentially containing prohibited content.".to_string()),
+            FinishReason::Spii => chat::FinishReason::ContentFilter("Token generation stopped because the content potentially contains Sensitive Personally Identifiable Information (SPII).".to_string()),
+            FinishReason::MalformedFunctionCall => chat::FinishReason::Error,
+            FinishReason::ImageSafety => chat::FinishReason::ContentFilter("Token generation stopped because generated images contain safety violations.".to_string())}
+}
+
+fn from_provider_usage(usage: UsageMetadata) -> Result<LanguageModelUsage, AIError> {
+    match (
+        usage.prompt_token_count,
+        usage.candidates_token_count,
+        usage.total_token_count,
+    ) {
+        (Some(prompt_tokens), None, None) => Ok(LanguageModelUsage {
+            prompt_tokens,
+            completion_tokens: 0,
+            total_tokens: prompt_tokens,
+        }),
+        (Some(prompt_tokens), Some(completion_tokens), _) => Ok(LanguageModelUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens + completion_tokens,
+        }),
+        _ => Err(AIError::ConversionError(
+            "Missing token usage metadata".to_string(),
+        )),
     }
 }

@@ -65,22 +65,22 @@ pub enum Temperature {
     Normalized(f32),
 }
 
-/// A validated temperature value that is guaranteed to be between 0.0 and 1.0.
-pub struct ValidTemperature(f32);
-
-impl ValidTemperature {
-    /// Creates a new temperature value that is checked at compile time.
-    /// Will cause a compile error if the value is outside the valid range.
-    pub const fn new(value: f32) -> Self {
-        assert!(
-            value >= 0.0 && value <= 1.0,
-            "Temperature must be between 0.0 and 1.0"
-        );
-        Self(value)
+impl Temperature {
+    /// Creates a temperature.
+    ///
+    /// Since different providers use different `temperature` values, this is normalized across
+    /// providers.
+    ///
+    /// Values smaller than `0.0` and larger than `1.0` are clamped.
+    pub fn new(value: f32) -> Self {
+        Temperature::Normalized(value.clamp(0.0, 1.0))
     }
 
-    pub fn value(&self) -> f32 {
-        self.0
+    /// Creates a raw temperature that is used as is.
+    ///
+    /// You should check if the provided values is valid for the provider you are using.
+    pub fn raw(value: f32) -> Self {
+        Temperature::Raw(value)
     }
 }
 
@@ -124,20 +124,8 @@ impl ChatSettings {
         self
     }
 
-    /// Sets a normalized temperature between 0.0 and 1.0.
-    /// Returns an error if the temperature is outside this range.
-    /// For temperatures outside this range, use `raw_temperature()`.
-    pub fn temperature(mut self, temperature: f32) -> Self {
-        self.temperature = Some(Temperature::Normalized(
-            ValidTemperature::new(temperature).value(),
-        ));
-        self
-    }
-
-    /// Sets a raw temperature value without normalization.
-    /// Use this for provider-specific temperature values that may be outside the 0.0 - 1.0 range.
-    pub fn raw_temperature(mut self, temperature: f32) -> Self {
-        self.temperature = Some(Temperature::Raw(temperature));
+    pub fn temperature(mut self, temperature: Temperature) -> Self {
+        self.temperature = Some(temperature);
         self
     }
 
