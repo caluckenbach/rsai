@@ -4,6 +4,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::Any;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use crate::AIError;
 use crate::provider::Provider;
@@ -70,10 +71,25 @@ pub struct ChatSettings {
 }
 
 #[derive(Debug, Clone)]
+pub struct Schema<T: DeserializeOwned>(PhantomData<T>);
+
+impl<T: DeserializeOwned> Schema<T> {
+    pub fn new() -> Self {
+        Schema(PhantomData)
+    }
+}
+
+impl<T: DeserializeOwned> Default for Schema<T> {
+    fn default() -> Self {
+        Schema(PhantomData)
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StructuredOutputParameters<T: DeserializeOwned> {
     pub output: OutputType,
     pub mode: Option<Mode>,
-    pub schema: Option<T>,
+    pub schema: Option<Schema<T>>,
     pub schema_name: Option<String>,
     pub schema_description: Option<String>,
     pub enum_values: Option<Vec<String>>,

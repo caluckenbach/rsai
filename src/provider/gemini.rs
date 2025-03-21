@@ -664,8 +664,13 @@ fn to_provider_mime_type<T: DeserializeOwned>(
     params: &StructuredOutputParameters<T>,
 ) -> Option<MimeType> {
     match params.output {
-        chat::OutputType::Object => Some(MimeType::Json),
-        chat::OutputType::Array => Some(MimeType::Json),
+        chat::OutputType::Object | chat::OutputType::Array => {
+            if params.schema.is_some() {
+                Some(MimeType::Json)
+            } else {
+                None
+            }
+        }
         chat::OutputType::Enum => Some(MimeType::Enum),
         chat::OutputType::NoSchema => None,
     }
@@ -675,10 +680,13 @@ fn to_provider_response_schema<T: DeserializeOwned + JsonSchema>(
     params: &StructuredOutputParameters<T>,
 ) -> Option<SchemaObject> {
     match params.output {
-        chat::OutputType::Object | chat::OutputType::Array => params
-            .schema
-            .as_ref()
-            .map(|_| schemars::schema_for!(T).schema),
+        chat::OutputType::Object | chat::OutputType::Array => {
+            // Only generate schema if a schema instance is provided
+            params
+                .schema
+                .as_ref()
+                .map(|_| schemars::schema_for!(T).schema)
+        }
         _ => None,
     }
 }
