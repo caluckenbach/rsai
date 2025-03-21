@@ -7,12 +7,14 @@ use schemars::JsonSchema;
 use schemars::schema::SchemaObject;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use std::str::from_utf8;
 
 use crate::AIError;
 use crate::model::chat;
 use crate::model::chat::StructuredOutput;
 use crate::model::chat::StructuredOutputParameters;
+use crate::model::chat::StructuredResult;
 use crate::model::chat::{LanguageModelUsage, Temperature};
 use crate::model::{ChatRole, ChatSettings, Message, TextCompletion, TextStream};
 
@@ -148,12 +150,91 @@ impl Provider for GeminiProvider {
         }))
     }
 
-    async fn generate_object<T: DeserializeOwned>(
+    async fn generate_object<T: DeserializeOwned + JsonSchema + Sync>(
         &self,
         prompt: &str,
         settings: &ChatSettings,
         parameters: &StructuredOutputParameters<T>,
     ) -> Result<StructuredOutput<T>, AIError> {
+        let url = format!("{}:generateContent", self.get_model_url());
+        let mut request = build_request(prompt, settings)?;
+
+        request.generation_config = to_structured_generation_config(settings, parameters);
+
+        if let Some(provider_settings) = to_provider_settings(settings) {
+            if let Some(false) = provider_settings.structured_outputs {
+                return Err(AIError::UnsupportedFunctionality(
+                    "Structured output is disabled".to_string(),
+                ));
+            }
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .headers(settings.headers.clone())
+            .query(&[("key", &self.api_key)])
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AIError::RequestError(e.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(AIError::ApiError(format!(
+                "error status {} - {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            )));
+        }
+
+        let parsed_response = response
+            .json::<GenerateContentResponse>()
+            .await
+            .map_err(|e| AIError::ConversionError(format!("Failed to parse response: {}", e)))?;
+
+        let candidate = parsed_response
+            .candidates
+            .first()
+            .ok_or_else(|| AIError::ApiError("No response candidates returned".to_string()))?;
+
+        let content_text = candidate
+            .content
+            .parts
+            .first()
+            .ok_or_else(|| AIError::ApiError("No content parts in response".to_string()))?
+            .text
+            .clone();
+
+        let value = match parameters.output {
+            chat::OutputType::Object => {
+                let parsed = serde_json::from_str(&content_text).map_err(|e| {
+                    AIError::ConversionError(format!("Failed to parse JSON object: {}", e))
+                })?;
+                StructuredResult::Object(parsed)
+            }
+            chat::OutputType::Array => {
+                let parsed = serde_json::from_str(&content_text).map_err(|e| {
+                    AIError::ConversionError(format!("Failed to parse JSON array: {}", e))
+                })?;
+                StructuredResult::Array(parsed)
+            }
+            chat::OutputType::Enum => todo!(),
+            chat::OutputType::NoSchema => todo!(),
+        };
+
+        let finish_reason = candidate
+            .finish_reason
+            .clone()
+            .map_or(chat::FinishReason::Unknown, from_provider_finish_reason);
+
+        let usage = from_provider_usage(parsed_response.usage_metadata)?;
+
+        Ok(StructuredOutput {
+            value,
+            finish_reason,
+            usage,
+        })
     }
 }
 
@@ -376,18 +457,20 @@ enum MimeType {
     Enum,
 }
 
-impl ToString for MimeType {
-    fn to_string(&self) -> String {
-        match self {
-            MimeType::Text => "text/plain".to_string(),
-            MimeType::Json => "application/json".to_string(),
-            MimeType::Enum => "text/x.enum".to_string(),
-        }
+impl Display for MimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mime_type_text = match self {
+            MimeType::Text => "text/plain",
+            MimeType::Json => "application/json",
+            MimeType::Enum => "text/x.enum",
+        };
+
+        write!(f, "{}", mime_type_text)
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SafetySetting {
+pub struct SafetySetting {
     pub category: SafetyCategory,
     pub threshold: HarmBlockThreshold,
 }
@@ -563,11 +646,11 @@ fn to_generation_config(settings: &ChatSettings) -> Option<GenerationConfig> {
     })
 }
 
-fn to_structured_generation_config<T: DeserializeOwned + JsonSchema>(
+fn to_structured_generation_config<T: DeserializeOwned + JsonSchema + Sync>(
     settings: &ChatSettings,
-    params: StructuredOutputParameters<T>,
+    params: &StructuredOutputParameters<T>,
 ) -> Option<GenerationConfig> {
-    let mut cfg = to_generation_config(settings).unwrap_or_else(|| GenerationConfig {
+    let mut cfg = to_generation_config(settings).unwrap_or(GenerationConfig {
         stop_sequences: None,
         max_output_tokens: None,
         temperature: None,
@@ -575,8 +658,8 @@ fn to_structured_generation_config<T: DeserializeOwned + JsonSchema>(
         response_schema: None,
     });
 
-    cfg.response_mime_type = to_provider_mime_type(&params);
-    cfg.response_schema = to_provider_response_schema(&params);
+    cfg.response_mime_type = to_provider_mime_type(params);
+    cfg.response_schema = to_provider_response_schema(params);
 
     if cfg.response_mime_type.is_some() && cfg.response_schema.is_none() {
         return None;
