@@ -78,12 +78,14 @@ pub struct StructuredOutputParameters<T: DeserializeOwned> {
     pub enum_values: Option<Vec<String>>,
 }
 
+#[derive(Debug)]
 pub struct StructuredOutput<T: DeserializeOwned> {
     pub value: StructuredResult<T>,
     pub finish_reason: FinishReason,
     pub usage: LanguageModelUsage,
 }
 
+#[derive(Debug)]
 pub enum StructuredResult<T> {
     Object(T),
     Array(Vec<T>),
