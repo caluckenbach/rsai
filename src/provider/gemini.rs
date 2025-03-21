@@ -7,7 +7,6 @@ use schemars::JsonSchema;
 use schemars::schema::SchemaObject;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use std::str::from_utf8;
 
 use crate::AIError;
@@ -205,6 +204,8 @@ impl Provider for GeminiProvider {
             .ok_or_else(|| AIError::ApiError("No content parts in response".to_string()))?
             .text
             .clone();
+
+        eprint!("{}", content_text);
 
         let value = match parameters.output {
             chat::OutputType::Object => {
@@ -452,21 +453,12 @@ struct GenerationConfig {
 #[derive(Debug, Clone, Serialize)]
 enum MimeType {
     /// Default
+    #[serde(rename = "text/plain")]
     Text,
+    #[serde(rename = "application/json")]
     Json,
+    #[serde(rename = "text/x.enum")]
     Enum,
-}
-
-impl Display for MimeType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mime_type_text = match self {
-            MimeType::Text => "text/plain",
-            MimeType::Json => "application/json",
-            MimeType::Enum => "text/x.enum",
-        };
-
-        write!(f, "{}", mime_type_text)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -661,7 +653,7 @@ fn to_structured_generation_config<T: DeserializeOwned + JsonSchema + Sync>(
     cfg.response_mime_type = to_provider_mime_type(params);
     cfg.response_schema = to_provider_response_schema(params);
 
-    if cfg.response_mime_type.is_some() && cfg.response_schema.is_none() {
+    if cfg.response_mime_type.is_none() && cfg.response_schema.is_none() {
         return None;
     }
 
