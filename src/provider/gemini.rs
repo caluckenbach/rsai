@@ -3,11 +3,16 @@ use bytes::Bytes;
 use futures::Stream;
 use futures::StreamExt;
 use reqwest::Client;
+use schemars::JsonSchema;
+use schemars::schema::SchemaObject;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::str::from_utf8;
 
 use crate::AIError;
 use crate::model::chat;
+use crate::model::chat::StructuredOutput;
+use crate::model::chat::StructuredOutputParameters;
 use crate::model::chat::{LanguageModelUsage, Temperature};
 use crate::model::{ChatRole, ChatSettings, Message, TextCompletion, TextStream};
 
@@ -141,6 +146,14 @@ impl Provider for GeminiProvider {
             },
             Err(e) => Err(AIError::RequestError(format!("Stream error: {}", e))),
         }))
+    }
+
+    async fn generate_object<T: DeserializeOwned>(
+        &self,
+        prompt: &str,
+        settings: &ChatSettings,
+        parameters: &StructuredOutputParameters<T>,
+    ) -> Result<StructuredOutput<T>, AIError> {
     }
 }
 
@@ -336,19 +349,45 @@ struct SystemInstruction {
 /// Not all parameters are configurable for every model.
 ///
 /// [Google API Docs](https://ai.google.dev/api/generate-content#generationconfig)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GenerationConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     stop_sequences: Option<Vec<String>>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     max_output_tokens: Option<i32>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_mime_type: Option<MimeType>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    response_schema: Option<SchemaObject>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+enum MimeType {
+    /// Default
+    Text,
+    Json,
+    Enum,
+}
+
+impl ToString for MimeType {
+    fn to_string(&self) -> String {
+        match self {
+            MimeType::Text => "text/plain".to_string(),
+            MimeType::Json => "application/json".to_string(),
+            MimeType::Enum => "text/x.enum".to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SafetySetting {
+struct SafetySetting {
     pub category: SafetyCategory,
     pub threshold: HarmBlockThreshold,
 }
@@ -516,10 +555,57 @@ fn to_generation_config(settings: &ChatSettings) -> Option<GenerationConfig> {
     let temperature = settings.temperature.clone().map(to_provider_temperature);
 
     Some(GenerationConfig {
+        stop_sequences: settings.stop_sequences.clone(),
         max_output_tokens: settings.max_tokens,
         temperature,
-        stop_sequences: settings.stop_sequences.clone(),
+        response_mime_type: None,
+        response_schema: None,
     })
+}
+
+fn to_structured_generation_config<T: DeserializeOwned + JsonSchema>(
+    settings: &ChatSettings,
+    params: StructuredOutputParameters<T>,
+) -> Option<GenerationConfig> {
+    let mut cfg = to_generation_config(settings).unwrap_or_else(|| GenerationConfig {
+        stop_sequences: None,
+        max_output_tokens: None,
+        temperature: None,
+        response_mime_type: None,
+        response_schema: None,
+    });
+
+    cfg.response_mime_type = to_provider_mime_type(&params);
+    cfg.response_schema = to_provider_response_schema(&params);
+
+    if cfg.response_mime_type.is_some() && cfg.response_schema.is_none() {
+        return None;
+    }
+
+    Some(cfg)
+}
+
+fn to_provider_mime_type<T: DeserializeOwned>(
+    params: &StructuredOutputParameters<T>,
+) -> Option<MimeType> {
+    match params.output {
+        chat::OutputType::Object => Some(MimeType::Json),
+        chat::OutputType::Array => Some(MimeType::Json),
+        chat::OutputType::Enum => Some(MimeType::Enum),
+        chat::OutputType::NoSchema => None,
+    }
+}
+
+fn to_provider_response_schema<T: DeserializeOwned + JsonSchema>(
+    params: &StructuredOutputParameters<T>,
+) -> Option<SchemaObject> {
+    match params.output {
+        chat::OutputType::Object | chat::OutputType::Array => params
+            .schema
+            .as_ref()
+            .map(|_| schemars::schema_for!(T).schema),
+        _ => None,
+    }
 }
 
 /// Map Temperature enum to Gemini's temperature scale [0.0-2.0]
