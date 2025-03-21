@@ -1,7 +1,7 @@
 use ai::{
     model::{
         ChatSettings,
-        chat::{ChatModel, Mode, OutputType, StructuredOutputParameters, StructuredResult},
+        chat::{ChatModel, Mode, OutputType, Schema, StructuredOutputParameters, StructuredResult},
     },
     provider::gemini::{GeminiProvider, GeminiSettings},
 };
@@ -16,7 +16,7 @@ struct Recipe {
     name: String,
     ingredients: Vec<String>,
     instructions: Vec<String>,
-    prep_time_minutes: u32,
+    prep_time_minutes: i32,
     difficulty: String,
 }
 
@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let parameters = StructuredOutputParameters {
         output: OutputType::Object,
         mode: Some(Mode::Json),
-        schema: None::<Recipe>, // We're not providing an example, just the schema
+        schema: Some(Schema::<Recipe>::new()),
         schema_name: Some("Recipe".to_string()),
         schema_description: Some("A cooking recipe with ingredients and instructions".to_string()),
         enum_values: None,
@@ -102,4 +102,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
