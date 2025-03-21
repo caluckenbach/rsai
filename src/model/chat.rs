@@ -1,4 +1,5 @@
 use reqwest::header;
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::any::Any;
@@ -30,7 +31,7 @@ impl<P: Provider> ChatModel<P> {
         self.provider.stream_text(prompt, &self.settings).await
     }
 
-    pub async fn generate_object<T: DeserializeOwned>(
+    pub async fn generate_object<T: DeserializeOwned + JsonSchema + Sync>(
         &self,
         prompt: &str,
         parameters: &StructuredOutputParameters<T>,

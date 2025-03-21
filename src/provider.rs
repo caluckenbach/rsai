@@ -5,6 +5,7 @@ use crate::model::chat::{StructuredOutput, StructuredOutputParameters, TextStrea
 use crate::model::{ChatSettings, TextCompletion};
 use async_trait::async_trait;
 use futures::Stream;
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 
 #[async_trait]
@@ -21,7 +22,7 @@ pub trait Provider {
         settings: &'a ChatSettings,
     ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError>;
 
-    async fn generate_object<T: DeserializeOwned>(
+    async fn generate_object<T: DeserializeOwned + JsonSchema + Sync>(
         &self,
         prompt: &str,
         settings: &ChatSettings,
