@@ -155,6 +155,14 @@ impl Provider for GeminiProvider {
         settings: &ChatSettings,
         parameters: &StructuredOutputParameters<T>,
     ) -> Result<StructuredOutput<T>, AIError> {
+        if parameters.output == chat::OutputType::NoSchema
+            && parameters.mode != Some(chat::Mode::Json)
+        {
+            return Err(AIError::InvalidInput(
+                "Mode must be 'json' for 'OutputType::NoSchema'".to_string(),
+            ));
+        }
+
         let url = format!("{}:generateContent", self.get_model_url());
         let mut request = build_request(prompt, settings)?;
 
@@ -221,7 +229,11 @@ impl Provider for GeminiProvider {
                 StructuredResult::Array(parsed)
             }
             chat::OutputType::Enum => todo!(),
-            chat::OutputType::NoSchema => todo!(),
+            chat::OutputType::NoSchema => {
+                let parsed = serde_json::from_str(&content_text)
+                    .map_err(|e| AIError::ConversionError(format!("Filed to parse JSON: {}", e)))?;
+                StructuredResult::NoSchema(parsed)
+            }
         };
 
         let finish_reason = candidate
