@@ -1,4 +1,5 @@
 pub mod gemini;
+pub mod openai;
 
 use crate::error::AIError;
 use crate::model::chat::{StructuredOutput, StructuredOutputParameters, TextStream};
