@@ -4,12 +4,12 @@ use reqwest::{Client, header};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::any::Any;
-use std::collections::HashMap;
+use std::pin::Pin;
 
 use crate::AIError;
 use crate::model::chat::{self, FinishReason, LanguageModelUsage, ProviderOptions, Temperature};
 use crate::model::chat::{StructuredOutput, StructuredOutputParameters};
-use crate::model::{ChatRole, ChatSettings, Message, TextCompletion, TextStream};
+use crate::model::{ChatRole, ChatSettings, TextCompletion, TextStream};
 
 use super::Provider;
 
@@ -32,6 +32,8 @@ pub struct OpenAISettings {
 
     /// If specified, OpenAI will make a best effort to sample deterministically.
     pub seed: Option<i64>,
+
+    pub temperature: Option<f32>,
 
     /// A unique identifier representing the end-user, to help OpenAI monitor and detect abuse.
     pub user: Option<String>,
@@ -111,6 +113,7 @@ struct ChatCompletionRequest {
     max_completion_tokens: Option<i64>,
     // metadata
     // modalities
+    #[serde(skip_serializing_if = "Option::is_none")]
     parallel_tool_calls: Option<bool>,
     // prediction
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -294,6 +297,175 @@ impl OpenAIProvider {
     }
 }
 
+// Helper functions for OpenAI provider
+
+/// Builds the request payload for the OpenAI API
+fn build_request(
+    prompt: &str,
+    settings: &ChatSettings,
+    default_model: &str,
+) -> Result<ChatCompletionRequest, AIError> {
+    let mut messages = Vec::new();
+
+    // Add system prompt if available
+    if let Some(system_prompt) = &settings.system_prompt {
+        messages.push(ChatMessage {
+            role: "system".to_string(),
+            content: system_prompt.clone(),
+        });
+    }
+
+    // Add conversation history if available
+    if let Some(history) = &settings.messages {
+        for msg in history {
+            let role = match msg.role {
+                ChatRole::User => "user",
+                ChatRole::Assistant => "assistant",
+                ChatRole::System => "system",
+            };
+
+            messages.push(ChatMessage {
+                role: role.to_string(),
+                content: msg.content.clone(),
+            });
+        }
+    }
+
+    // Add the current prompt as a user message
+    messages.push(ChatMessage {
+        role: "user".to_string(),
+        content: prompt.to_string(),
+    });
+
+    // Extract OpenAI-specific settings if available
+    let provider_settings = settings
+        .provider_options
+        .as_ref()
+        .and_then(|options| options.as_any().downcast_ref::<OpenAISettings>());
+
+    // Use provider-specified model or fallback to the default
+    let model = provider_settings
+        .and_then(|s| s.model.clone())
+        .unwrap_or_else(|| default_model.to_string());
+
+    // Map temperature from ChatSettings
+    let temperature = settings.temperature.as_ref().map(|temp| match temp {
+        Temperature::Raw(val) => *val,
+        Temperature::Normalized(val) => val.clamp(0.0, 1.0) * 2.0, // Scale to OpenAI's 0-2 range
+    });
+
+    // Create request
+    let request = ChatCompletionRequest {
+        model,
+        messages,
+        frequency_penalty: provider_settings.and_then(|s| s.frequency_penalty),
+        max_completion_tokens: settings.max_tokens.map(|t| t as i64),
+        parallel_tool_calls: None,
+        presence_penalty: provider_settings.and_then(|s| s.presence_penalty),
+        response_format: None,
+        seed: provider_settings.and_then(|s| s.seed),
+        stop: settings.stop_sequences.clone(),
+        store: None,
+        stream: None,
+        temperature,
+        user: provider_settings.and_then(|s| s.user.clone()),
+    };
+
+    Ok(request)
+}
+
+/// Maps OpenAI finish reason to our FinishReason enum
+fn map_finish_reason(reason: String) -> FinishReason {
+    match reason.as_str() {
+        "stop" => FinishReason::Stop,
+        "length" => FinishReason::Length,
+        "content_filter" => {
+            FinishReason::ContentFilter("OpenAI content filter triggered".to_string())
+        }
+        "tool_calls" => FinishReason::ToolCalls,
+        "function_call" => FinishReason::ToolCalls, // Legacy, map to tool calls
+        _ => FinishReason::Other,
+    }
+}
+
+/// Maps OpenAI usage information to our LanguageModelUsage type
+fn map_usage(usage: &Usage) -> LanguageModelUsage {
+    LanguageModelUsage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+    }
+}
+
+/// Parses an SSE chunk into a TextStream
+fn parse_sse_chunk(bytes: bytes::Bytes) -> Result<TextStream, AIError> {
+    use std::str::from_utf8;
+
+    let chunk_str = from_utf8(&bytes)
+        .map_err(|e| AIError::ConversionError(format!("Invalid UTF-8 in SSE chunk: {}", e)))?
+        .trim();
+
+    if chunk_str.is_empty() {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Unknown,
+            usage: None,
+        });
+    }
+
+    // SSE format: each message is prefixed with "data: "
+    let Some(data) = chunk_str.strip_prefix("data: ") else {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Other,
+            usage: None,
+        });
+    };
+
+    let data = data.trim();
+
+    // Check for the end of stream marker
+    if data == "[DONE]" {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Stop,
+            usage: None,
+        });
+    }
+
+    // Parse the JSON data
+    let chunk: ChatCompletionChunk = serde_json::from_str(data)
+        .map_err(|e| AIError::ConversionError(format!("Invalid JSON in SSE chunk: {}", e)))?;
+
+    if chunk.choices.is_empty() {
+        return Ok(TextStream {
+            text: String::new(),
+            finish_reason: chat::FinishReason::Other,
+            usage: None,
+        });
+    }
+
+    // Extract the content delta
+    let choice = &chunk.choices[0];
+    let text = choice.delta.content.clone().unwrap_or_default();
+
+    // Map finish reason if provided
+    let finish_reason = choice
+        .finish_reason
+        .clone()
+        .map_or(chat::FinishReason::Unknown, map_finish_reason);
+
+    // If available, map usage info
+    let usage = chunk.usage.as_ref().map(map_usage);
+
+    Ok(TextStream {
+        text,
+        finish_reason,
+        usage,
+    })
+}
+type PinnedStream<'a> = Pin<Box<dyn Stream<Item = Result<TextStream, AIError>> + 'a>>;
+
 #[async_trait]
 impl Provider for OpenAIProvider {
     async fn generate_text(
@@ -301,21 +473,70 @@ impl Provider for OpenAIProvider {
         prompt: &str,
         settings: &ChatSettings,
     ) -> Result<TextCompletion, AIError> {
-        // Implementation will be added later
-        Err(AIError::UnsupportedFunctionality(
-            "Not yet implemented".to_string(),
-        ))
+        let url = self.get_chat_completions_url();
+        let request = build_request(prompt, settings, &self.model)?;
+
+        let response = self
+            .client
+            .post(&url)
+            .headers(settings.headers.clone())
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AIError::RequestError(e.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(AIError::ApiError(format!(
+                "API returned error status {}: {}",
+                status, error_text
+            )));
+        }
+
+        let response_body = response
+            .json::<ChatCompletionResponse>()
+            .await
+            .map_err(|e| AIError::ConversionError(format!("Failed to parse response: {}", e)))?;
+
+        let choice = response_body
+            .choices
+            .first()
+            .ok_or_else(|| AIError::ApiError("No response choices returned".to_string()))?;
+
+        // Extract content, handling refusal
+        let text = match (&choice.message.content, &choice.message.refusal) {
+            (Some(content), _) => content.clone(),
+            (None, Some(refusal)) => {
+                return Err(AIError::ContentFilterError(refusal.clone()));
+            }
+            (None, None) => {
+                return Err(AIError::ApiError(
+                    "Response missing both content and refusal".to_string(),
+                ));
+            }
+        };
+
+        let finish_reason = choice
+            .finish_reason
+            .clone()
+            .map_or(chat::FinishReason::Unknown, map_finish_reason);
+
+        let usage = map_usage(&response_body.usage);
+
+        Ok(TextCompletion {
+            text,
+            finish_reason,
+            usage,
+        })
     }
 
     async fn stream_text<'a>(
         &'a self,
         prompt: &'a str,
         settings: &'a ChatSettings,
-    ) -> Result<impl Stream<Item = Result<TextStream, AIError>> + 'a, AIError> {
-        // Implementation will be added later
-        Err(AIError::UnsupportedFunctionality(
-            "Not yet implemented".to_string(),
-        ))
+    ) -> Result<PinnedStream, AIError> {
+        todo!("To implement");
     }
 
     async fn generate_object<T: DeserializeOwned + JsonSchema + Sync>(
@@ -330,4 +551,3 @@ impl Provider for OpenAIProvider {
         ))
     }
 }
-

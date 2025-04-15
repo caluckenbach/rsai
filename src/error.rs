@@ -17,4 +17,7 @@ pub enum AIError {
 
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    
+    #[error("content filtered: {0}")]
+    ContentFilterError(String),
 }
