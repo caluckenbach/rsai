@@ -165,6 +165,36 @@ struct ChatCompletionResponse {
     usage: Usage,
 }
 
+/// Represents a streamed chunk of a chat completion response.
+#[derive(Debug, Deserialize)]
+struct ChatCompletionChunk {
+    id: String,
+    choices: Vec<ChatCompletionChunkChoice>,
+    created: i32,
+    model: String,
+    /// Is always `chat.completion.chunk`
+    object: String,
+    service_tier: Option<String>,
+    system_fingerprint: String,
+    usage: Option<Usage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChatCompletionChunkChoice {
+    delta: CompletionDelta,
+    finish_reason: Option<String>,
+    index: i32,
+    // logprobs
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionDelta {
+    content: Option<String>,
+    refusal: Option<String>,
+    role: String,
+    // tool_calls
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatCompletionChoice {
     finish_reason: Option<String>,
