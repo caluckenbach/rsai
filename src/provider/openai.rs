@@ -151,6 +151,7 @@ struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     stop: Option<Vec<String>>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     store: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -547,6 +548,15 @@ fn build_request(
         stream: None,
         temperature,
         user: provider_settings.and_then(|s| s.user.clone()),
+        audio: todo!(),
+        metadata: todo!(),
+        modalities: todo!(),
+        n: todo!(),
+        prediction: todo!(),
+        reasoning_effort: todo!(),
+        service_tier: todo!(),
+        stream_options: todo!(),
+        web_search_options: todo!(),
     };
 
     Ok(request)
@@ -727,5 +737,57 @@ impl Provider for OpenAIProvider {
         Err(AIError::UnsupportedFunctionality(
             "Not yet implemented".to_string(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn test_chat_completion_request_full_json() {
+        let request = ChatCompletionRequest {
+            model: "gpt-4.1-mini-2025-04-14".to_string(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "Hello, world!".to_string(),
+            }],
+            audio: None,
+            frequency_penalty: Some(0.5),
+            max_completion_tokens: Some(128),
+            metadata: None,
+            modalities: None,
+            n: None,
+            parallel_tool_calls: None,
+            prediction: None,
+            presence_penalty: None,
+            reasoning_effort: None,
+            response_format: None,
+            seed: None,
+            service_tier: None,
+            stop: None,
+            store: None,
+            stream: None,
+            stream_options: None,
+            temperature: Some(1.0),
+            user: Some("test-user".to_string()),
+            web_search_options: None,
+        };
+
+        let actual_json = serde_json::to_value(&request).unwrap();
+
+        let expected_json = json!({
+            "model": "gpt-4.1-mini-2025-04-14",
+            "messages": [
+                { "role": "user", "content": "Hello, world!" }
+            ],
+            "frequency_penalty": 0.5,
+            "max_completion_tokens": 128,
+            "temperature": 1.0,
+            "user": "test-user"
+        });
+
+        assert_eq!(actual_json, expected_json);
     }
 }
