@@ -4,6 +4,7 @@ use reqwest::{Client, header};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::any::Any;
+use std::collections::HashMap;
 use std::pin::Pin;
 
 use crate::AIError;
@@ -104,41 +105,152 @@ pub struct OpenAIProvider {
 struct ChatCompletionRequest {
     model: String,
     messages: Vec<ChatMessage>,
-    // audio
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    audio: Option<Audio>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     frequency_penalty: Option<f32>,
+
     // logit_bias
     // logprobs
     #[serde(skip_serializing_if = "Option::is_none")]
     max_completion_tokens: Option<i64>,
-    // metadata
-    // modalities
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    metadata: Option<HashMap<String, String>>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modalities: Option<Vec<Modality>>,
+
+    /// Default is 1
+    #[serde(skip_serializing_if = "Option::is_none")]
+    n: Option<i32>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     parallel_tool_calls: Option<bool>,
-    // prediction
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prediction: Option<StaticContent>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     presence_penalty: Option<f32>,
-    // reasoning_effort
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reasoning_effort: Option<ReasoningEffort>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     response_format: Option<ResponseFormat>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     seed: Option<i64>,
-    // service_tier
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    service_tier: Option<ServiceTier>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     stop: Option<Vec<String>>,
+
     store: Option<bool>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     stream: Option<bool>,
-    // stream_options
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     temperature: Option<f32>,
+
     // tool_choice
     // tools
     // top_logprobs
     // top_p
     #[serde(skip_serializing_if = "Option::is_none")]
     user: Option<String>,
-    // web_search_options
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    web_search_options: Option<WebSearchOptions>,
+}
+
+#[derive(Debug, Serialize)]
+struct StaticContent {
+    content: Content,
+
+    #[serde(rename = "type")]
+    static_content_type: ContentType,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ContentType {
+    Content,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum Content {
+    TextContent(String),
+    ArrayOfContent(Vec<String>),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ReasoningEffort {
+    Low,
+    Medium,
+    Hight,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ServiceTier {
+    Default,
+    Auto,
+}
+
+#[derive(Debug, Serialize)]
+struct StreamOptions {
+    /// If set, an additional chunk will be streamed before the data: \[DONE\] message.
+    /// The usage field on this chunk shows the token usage statistics for the entire request,
+    /// and the choices field will always be an empty array.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    include_usage: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct WebSearchOptions {
+    /// Reusing `ResoningEffort` here, since the options are also `low`,`medium` and `high`.
+    search_context_size: Option<ReasoningEffort>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user_location: Option<UserLocation>,
+}
+
+#[derive(Debug, Serialize)]
+struct UserLocation {
+    approximate: ApproximateLocation,
+
+    location_type: LocationType,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum LocationType {
+    Approximate,
+}
+
+#[derive(Debug, Serialize)]
+struct ApproximateLocation {
+    city: Option<String>,
+
+    /// Two-letter country code.
+    country: Option<String>,
+
+    region: Option<String>,
+
+    /// IANA timezone.
+    timezone: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,17 +267,57 @@ struct ChatMessage {
     content: String,
 }
 
+#[derive(Debug, Serialize)]
+struct Audio {
+    format: AudioFormat,
+    voice: Voice,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioFormat {
+    WAV,
+    MP3,
+    FLAC,
+    OPUS,
+    PCM16,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Voice {
+    ALLOY,
+    ASH,
+    BALLAD,
+    CORAL,
+    ECHO,
+    SAGE,
+    SHIMMER,
+}
+
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     id: String,
     choices: Vec<ChatCompletionChoice>,
     created: i32,
     model: String,
-    /// Is always `chat.completion`
-    object: String,
+    object: CompletionType,
     service_tier: Option<String>,
     system_fingerprint: String,
     usage: Usage,
+}
+
+#[derive(Debug, Deserialize)]
+enum CompletionType {
+    #[serde(rename = "chat.completion")]
+    ChatCompletion,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Modality {
+    TEXT,
+    AUDIO,
 }
 
 /// Represents a streamed chunk of a chat completion response.
@@ -175,11 +327,16 @@ struct ChatCompletionChunk {
     choices: Vec<ChatCompletionChunkChoice>,
     created: i32,
     model: String,
-    /// Is always `chat.completion.chunk`
-    object: String,
+    object: CompletionType,
     service_tier: Option<String>,
     system_fingerprint: String,
     usage: Option<Usage>,
+}
+
+#[derive(Debug, Deserialize)]
+enum CompletionChunkType {
+    #[serde(rename = "chat.completion.chunk")]
+    ChatCompletionChunk,
 }
 
 #[derive(Debug, Deserialize)]
@@ -218,10 +375,15 @@ struct ChatMessageResponse {
 
 #[derive(Debug, Deserialize)]
 struct Annotation {
-    /// Is always `url_citation`
     #[serde(rename = "type")]
-    annotation_type: String,
+    annotation_type: AnnotationType,
     url_citation: UrlCitation,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AnnotationType {
+    UrlCitation,
 }
 
 #[derive(Debug, Deserialize)]
