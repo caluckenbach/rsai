@@ -155,31 +155,71 @@ struct ChatMessage {
 #[derive(Debug, Deserialize)]
 struct ChatCompletionResponse {
     id: String,
-    object: String,
-    created: i64,
-    model: String,
     choices: Vec<ChatCompletionChoice>,
+    created: i32,
+    model: String,
+    /// Is always `chat.completion`
+    object: String,
+    service_tier: Option<String>,
+    system_fingerprint: String,
     usage: Usage,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatCompletionChoice {
-    index: i32,
-    message: ChatMessageResponse,
     finish_reason: Option<String>,
+    index: i32,
+    // logprobs
+    message: ChatMessageResponse,
 }
 
 #[derive(Debug, Deserialize)]
 struct ChatMessageResponse {
-    role: String,
     content: Option<String>,
+    refusal: Option<String>,
+    role: String,
+    annotations: Option<Vec<Annotation>>,
+    // audio
+    // tool_calls
+}
+
+#[derive(Debug, Deserialize)]
+struct Annotation {
+    /// Is always `url_citation`
+    #[serde(rename = "type")]
+    annotation_type: String,
+    url_citation: UrlCitation,
+}
+
+#[derive(Debug, Deserialize)]
+struct UrlCitation {
+    end_index: i32,
+    start_index: i32,
+    title: String,
+    url: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct Usage {
-    prompt_tokens: i32,
     completion_tokens: i32,
+    prompt_tokens: i32,
     total_tokens: i32,
+    completion_tokens_details: CompletionTokensDetails,
+    prompt_tokens_details: PromptTokensDetails,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompletionTokensDetails {
+    accepted_prediction_tokens: i32,
+    audio_tokens: i32,
+    reasoning_tokens: i32,
+    rejected_prediction_tokens: i32,
+}
+
+#[derive(Debug, Deserialize)]
+struct PromptTokensDetails {
+    audio_tokens: i32,
+    cached_tokens: i32,
 }
 
 impl OpenAIProvider {
