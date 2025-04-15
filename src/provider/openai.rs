@@ -308,7 +308,7 @@ struct ChatCompletionResponse {
     usage: Usage,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 enum CompletionType {
     #[serde(rename = "chat.completion")]
     ChatCompletion,
@@ -789,5 +789,67 @@ mod tests {
         });
 
         assert_eq!(actual_json, expected_json);
+    }
+
+    #[test]
+    fn test_chat_completion_response_deserialization() {
+        let json = r#"
+
+        {
+          "id": "chatcmpl-B9MBs8CjcvOU2jLn4n570S5qMJKcT",
+          "object": "chat.completion",
+          "created": 1741569952,
+          "model": "gpt-4.1-2025-04-14",
+          "choices": [
+            {
+              "index": 0,
+              "message": {
+                "role": "assistant",
+                "content": "Hello! How can I assist you today?",
+                "refusal": null,
+                "annotations": []
+              },
+              "logprobs": null,
+              "finish_reason": "stop"
+            }
+          ],
+          "usage": {
+            "prompt_tokens": 19,
+            "completion_tokens": 10,
+            "total_tokens": 29,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          },
+          "service_tier": "default",
+          "system_fingerprint": "fp_fc9f1d7035"
+        }
+        "#;
+
+        let resp: ChatCompletionResponse = serde_json::from_str(json).unwrap();
+
+        assert_eq!(resp.id, "chatcmpl-B9MBs8CjcvOU2jLn4n570S5qMJKcT");
+        assert_eq!(resp.model, "gpt-4.1-2025-04-14");
+        assert_eq!(resp.object, CompletionType::ChatCompletion);
+        assert_eq!(resp.choices.len(), 1);
+        let choice = &resp.choices[0];
+        assert_eq!(choice.index, 0);
+        assert_eq!(choice.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(choice.message.role, "assistant");
+        assert_eq!(
+            choice.message.content.as_deref(),
+            Some("Hello! How can I assist you today?")
+        );
+        assert_eq!(resp.usage.prompt_tokens, 19);
+        assert_eq!(resp.usage.completion_tokens, 10);
+        assert_eq!(resp.usage.total_tokens, 29);
+        assert_eq!(resp.service_tier.as_deref(), Some("default"));
     }
 }
