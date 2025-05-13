@@ -21,3 +21,12 @@
 - **Module Structure**: Use direct files (not mod.rs) for module declarations
 - **Architecture**: Use trait-based abstractions with builder pattern
 - **Async**: Use `async_trait` for async trait methods
+
+## Provider Implementation Guidelines
+- Use builder pattern for provider-specific settings
+- Map provider-specific parameters via `ProviderOptions` trait
+- Support streaming responses asynchronously with proper error handling
+- Include comprehensive error mapping from provider APIs to `AIError`
+- Implement JSON/structured output modes where supported
+- Add specific provider examples in the examples directory
+- Write both unit tests (mocking API responses) and integration tests

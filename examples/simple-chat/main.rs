@@ -1,12 +1,15 @@
-use ai::{
-    model::{
-        ChatSettings,
-        chat::{ChatModel, Temperature},
-    },
-    provider::gemini::{GeminiProvider, GeminiSettings},
+use ai::core::{
+    builder::llm,
+    types::{ChatRole, Message},
 };
 use dotenv::dotenv;
+use serde::Deserialize;
 use std::env;
+
+#[derive(Deserialize)]
+struct Foo {
+    bar: i32,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -16,32 +19,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get API key from environment
     let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
 
-    // Create a Gemini provider with the default model (gemini-2.0-flash)
-    let provider = GeminiProvider::default(&api_key);
+    let messages: Vec<Message> = vec![Message {
+        role: ChatRole::User,
+        content: "Provide a random number".to_string(),
+    }];
 
-    // Create Gemini-specific settings
-    let gemini_settings = GeminiSettings::new().into_provider_options();
+    let foo = llm::call()
+        .provider("openai")?
+        .model("gpt-4o-mini")
+        .response_model::<Foo>()
+        .messages(messages)
+        .send()
+        .await?;
 
-    // Create chat settings with a system message
-    let settings = ChatSettings::new()
-        .system_prompt("You are a helpful assistant that provides concise answers.")
-        .temperature(Temperature::new(0.7))
-        .max_tokens(1024)
-        .provider_options(gemini_settings);
-
-    // Create the chat model with the provider and settings
-    let model = ChatModel::new(provider, settings);
-
-    // Generate text for a simple prompt
-    let prompt = "What are the three largest cities in France?";
-    println!("Sending prompt: {}", prompt);
-
-    // Call the model and get the response
-    let response = model.generate_text(prompt).await?;
-
-    // Print the response
-    println!("\nAI Response:");
-    println!("{:#?}", response);
+    println!("bar: {:?}", foo.bar);
 
     Ok(())
 }

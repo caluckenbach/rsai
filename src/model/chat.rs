@@ -222,19 +222,6 @@ impl ChatSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Message {
-    pub role: ChatRole,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum ChatRole {
-    System,
-    User,
-    Assistant,
-}
-
 pub trait ProviderOptions: Debug + Send + Sync + Any {
     fn clone_box(&self) -> Box<dyn ProviderOptions>;
 
