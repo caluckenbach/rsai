@@ -2,13 +2,15 @@ use async_trait::async_trait;
 
 use super::{
     error::LlmError,
-    types::{ChatCompletionRequest, ChatCompletionResponse},
+    types::{StructuredRequest, StructuredResponse},
 };
 
 #[async_trait]
-pub trait ChatCompletion: Send + Sync {
-    async fn complete(
+pub trait LlmProvider {
+    async fn generate_structured<T>(
         &self,
-        request: &ChatCompletionRequest,
-    ) -> Result<ChatCompletionResponse, LlmError>;
+        request: StructuredRequest,
+    ) -> Result<StructuredResponse<T>, LlmError>
+    where
+        T: serde::de::DeserializeOwned + Send;
 }

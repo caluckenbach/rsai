@@ -12,26 +12,14 @@ pub enum ChatRole {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChatCompletionRequest {
+pub struct StructuredRequest {
     pub messages: Vec<Message>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ChatCompletionResponse {
-    pub text: String,
-    pub finish_reason: FinishReason,
+pub struct StructuredResponse<T> {
+    pub content: T,
     pub usage: LanguageModelUsage,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum FinishReason {
-    Stop,
-    Length,
-    ContentFilter(String),
-    ToolCalls,
-    Error,
-    Other,
-    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq)]
