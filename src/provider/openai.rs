@@ -1,36 +1,237 @@
-use std::sync::Arc;
+use crate::core::{
+    self,
+    types::{StructuredRequest, StructuredResponse},
+};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 
 use crate::core::{
     builder::{LlmBuilder, MessagesSet},
     error::LlmError,
-    traits::ChatCompletion,
-    types::{ChatCompletionRequest, ChatCompletionResponse},
+    traits::LlmProvider,
 };
 
-pub struct OpenAiProvider<
-    C: async_openai::config::Config + Default = async_openai::config::OpenAIConfig,
-> {
-    client: Arc<async_openai::Client<C>>,
+pub struct OpenAiClient {
+    api_key: String,
+    base_url: String,
+    client: reqwest::Client,
+    default_model: String,
 }
 
-impl OpenAiProvider<C> {
-    pub fn new() -> Self {
-        OpenAiProvider {
-            client: async_openai::Client::new(),
+impl OpenAiClient {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            api_key,
+            base_url: "https://api.openai.com/v1".to_string(),
+            client: reqwest::Client::new(),
+            default_model: "gpt-4.1".to_string(),
         }
     }
-}
 
-impl ChatCompletion for OpenAiProvider {
-    async fn complete<T>(
-        &self,
-        request: &ChatCompletionRequest,
-    ) -> Result<ChatCompletionResponse, LlmError> {
+    pub fn with_base_url(mut self, base_url: String) -> Self {
+        self.base_url = base_url;
+        self
+    }
+
+    pub fn with_default_model(mut self, model: String) -> Self {
+        self.default_model = model;
+        self
     }
 }
 
-pub fn create_provider_from_builder<T>(
+#[async_trait]
+impl LlmProvider for OpenAiClient {
+    async fn generate_structured<T>(
+        &self,
+        request: StructuredRequest,
+    ) -> Result<StructuredResponse<T>, LlmError>
+    where
+        T: serde::de::DeserializeOwned + Send,
+    {
+        // TODO: Fix error handling.
+
+        let request = create_openai_structured_request(request);
+
+        let url = format!("{}/responses", self.base_url);
+        let res = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| LlmError::Network(format!("Failed to complete request: {}", e)))?;
+
+        if !res.status().is_success() {
+            // TODO: Handle error response from OpenAI API
+            return Err(LlmError::Api(format!(
+                "OpenAI API returned error: status code {}",
+                res.status()
+            )));
+        }
+
+        let api_res: OpenAiStructuredResponse = res
+            .json()
+            .await
+            .map_err(|e| LlmError::Parse(format!("Failed to parse OpenAI response: {}", e)))?;
+
+        create_core_structured_response(api_res)
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct OpenAiMessage {
+    pub role: OpenAiChatRole,
+    pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+enum OpenAiChatRole {
+    System,
+    User,
+    Assistant,
+}
+#[derive(Debug, Serialize)]
+struct OpenAiStructuredRequest {
+    pub messages: Vec<OpenAiMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiStructuredResponse {
+    id: String,
+    model: String,
+    output: Vec<Message>,
+    pub usage: Usage,
+}
+
+#[derive(Debug, Deserialize)]
+struct Message {
+    id: String,
+
+    /// This is always `message`
+    #[serde(rename = "type")]
+    m_type: String,
+
+    status: MessageStatus,
+
+    content: Vec<MessageContent>,
+
+    /// This is always `assistant`
+    role: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum MessageContent {
+    OutputText(OutputText),
+    Refusal(Refusal),
+}
+
+#[derive(Debug, Deserialize)]
+struct OutputText {
+    id: String,
+
+    /// Always `output_text`
+    #[serde(rename = "type")]
+    c_type: String,
+
+    text: String,
+    // TODO
+    // annotations
+}
+
+#[derive(Debug, Deserialize)]
+struct Refusal {
+    /// The refusal explanationfrom the model.
+    refusal: String,
+
+    /// Always `refusal`
+    #[serde(rename = "type")]
+    r_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MessageStatus {
+    InProgress,
+    Completed,
+    Incomplete,
+}
+
+#[derive(Debug, Deserialize)]
+struct Usage {
+    input_tokens: i32,
+    output_tokens: i32,
+    total_tokens: i32,
+}
+
+pub fn create_openai_client_from_builder<T>(
     builder: &LlmBuilder<MessagesSet, T>,
-) -> Result<OpenAiProvider, LlmError> {
-    Ok(OpenAiProvider::new())
+) -> Result<OpenAiClient, LlmError> {
+    // Setting the model should be optional
+    let model = builder
+        .get_model()
+        .ok_or_else(|| LlmError::ProviderConfiguration("Model not set".to_string()))?
+        .to_string();
+
+    let api_key = builder
+        .get_api_key()
+        .ok_or_else(|| LlmError::ProviderConfiguration("OPENAI_API_KEY not set.".to_string()))?
+        .to_string();
+
+    let client = OpenAiClient::new(api_key).with_default_model(model);
+    Ok(client)
+}
+
+fn create_openai_structured_request(req: StructuredRequest) -> OpenAiStructuredRequest {
+    let messages = req
+        .messages
+        .into_iter()
+        .map(|m| OpenAiMessage {
+            role: match m.role {
+                core::types::ChatRole::System => OpenAiChatRole::System,
+                core::types::ChatRole::User => OpenAiChatRole::User,
+                core::types::ChatRole::Assistant => OpenAiChatRole::Assistant,
+            },
+            content: m.content,
+        })
+        .collect();
+
+    OpenAiStructuredRequest { messages }
+}
+
+fn create_core_structured_response<T>(
+    res: OpenAiStructuredResponse,
+) -> Result<StructuredResponse<T>, LlmError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let message = res
+        .output
+        .first()
+        .ok_or_else(|| LlmError::Parse("No messages in response".to_string()))?;
+
+    let content = message
+        .content
+        .first()
+        .ok_or_else(|| LlmError::Parse("No content in message".to_string()))?;
+
+    let text = match content {
+        MessageContent::OutputText(output) => &output.text,
+        MessageContent::Refusal(refusal) => {
+            return Err(LlmError::Api(format!("Model refused: {}", refusal.refusal)));
+        }
+    };
+
+    let parsed_content: T = serde_json::from_str(&text)
+        .map_err(|e| LlmError::Parse(format!("Failed to parse structured output: {}", e)))?;
+
+    Ok(StructuredResponse {
+        content: parsed_content,
+        usage: core::types::LanguageModelUsage {
+            prompt_tokens: res.usage.input_tokens,
+            completion_tokens: res.usage.output_tokens,
+            total_tokens: res.usage.total_tokens,
+        },
+    })
 }
