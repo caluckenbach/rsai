@@ -7,6 +7,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 #[derive(Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)] //  For now this is necessary for structured output to work.
 struct Foo {
     bar: i32,
 }
