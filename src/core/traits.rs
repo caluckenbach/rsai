@@ -12,5 +12,5 @@ pub trait LlmProvider {
         request: StructuredRequest,
     ) -> Result<StructuredResponse<T>, LlmError>
     where
-        T: serde::de::DeserializeOwned + Send;
+        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema;
 }

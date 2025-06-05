@@ -3,9 +3,10 @@ use ai::core::{
     types::{ChatRole, Message},
 };
 use dotenv::dotenv;
+use schemars::JsonSchema;
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, JsonSchema)]
 struct Foo {
     bar: i32,
 }

@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error, Clone)]
 pub enum LlmError {
     #[error("LLM-Builder error: {0}")]
     Builder(String),
