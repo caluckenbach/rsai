@@ -1,10 +1,9 @@
 use ai::core::{
-    builder::llm,
+    builder::{ApiKey, llm},
     types::{ChatRole, Message},
 };
 use dotenv::dotenv;
 use serde::Deserialize;
-use std::env;
 
 #[derive(Deserialize)]
 struct Foo {
@@ -13,11 +12,7 @@ struct Foo {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Load .env file if present
     dotenv().ok();
-
-    // Get API key from environment
-    let api_key = env::var("GEMINI_API_KEY").expect("GEMINI_API_KEY must be set");
 
     let messages: Vec<Message> = vec![Message {
         role: ChatRole::User,
@@ -26,10 +21,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let foo = llm::call()
         .provider("openai")?
+        .api_key(ApiKey::Default)?
         .model("gpt-4o-mini")
-        .response_model::<Foo>()
         .messages(messages)
-        .send()
+        .complete::<Foo>()
         .await?;
 
     println!("bar: {:?}", foo.bar);
