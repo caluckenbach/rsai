@@ -3,6 +3,7 @@ use crate::core::{
     types::{StructuredRequest, StructuredResponse},
 };
 use async_trait::async_trait;
+use schemars::schema_for;
 use serde::{Deserialize, Serialize};
 
 use crate::core::{
@@ -46,11 +47,11 @@ impl LlmProvider for OpenAiClient {
         request: StructuredRequest,
     ) -> Result<StructuredResponse<T>, LlmError>
     where
-        T: serde::de::DeserializeOwned + Send,
+        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
         // TODO: Fix error handling.
 
-        let request = create_openai_structured_request(request);
+        let request = create_openai_structured_request::<T>(request)?;
 
         let url = format!("{}/responses", self.base_url);
         let res = self
@@ -88,6 +89,36 @@ impl LlmProvider for OpenAiClient {
 struct OpenAiStructuredRequest {
     model: String,
     input: Vec<InputMessage>,
+    text: Format,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged, rename_all = "snake_case")]
+enum Format {
+    Text(TextType),
+    JsonSchema(JsonSchema),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TextType {
+    Text,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonSchema {
+    name: String,
+
+    schema: serde_json::Value,
+
+    #[serde(rename = "type")]
+    j_type: JsonSchemaType,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum JsonSchemaType {
+    JsonSchema,
 }
 
 #[derive(Debug, Serialize)]
@@ -189,7 +220,12 @@ pub fn create_openai_client_from_builder(
     Ok(client)
 }
 
-fn create_openai_structured_request(req: StructuredRequest) -> OpenAiStructuredRequest {
+fn create_openai_structured_request<T>(
+    req: StructuredRequest,
+) -> Result<OpenAiStructuredRequest, LlmError>
+where
+    T: schemars::JsonSchema,
+{
     let input = req
         .messages
         .into_iter()
@@ -203,10 +239,30 @@ fn create_openai_structured_request(req: StructuredRequest) -> OpenAiStructuredR
         })
         .collect();
 
-    OpenAiStructuredRequest {
+    let s = schema_for!(T);
+
+    let schema_name = s
+        .schema
+        .metadata
+        .as_ref()
+        .and_then(|meta| meta.title.as_ref())
+        .ok_or_else(|| {
+            LlmError::Parse("Failed to build JSON Schema: Missing schema name".to_string())
+        })?
+        .clone();
+
+    let schema = JsonSchema {
+        name: schema_name,
+        schema: serde_json::to_value(&s)
+            .map_err(|e| LlmError::Parse(format!("Failed to build JSON Schema: {}", e)))?,
+        j_type: JsonSchemaType::JsonSchema,
+    };
+
+    Ok(OpenAiStructuredRequest {
         model: req.model,
         input,
-    }
+        text: Format::JsonSchema(schema),
+    })
 }
 
 fn create_core_structured_response<T>(
