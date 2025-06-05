@@ -67,13 +67,16 @@ pub enum ApiKey {
 impl LlmBuilder<ProviderSet> {
     pub fn api_key(self, api_key: ApiKey) -> Result<LlmBuilder<ApiKeySet>, LlmError> {
         let key = match api_key {
-            ApiKey::Default => {
-                match self.provider.as_deref() {
-                    Some("openai") => env::var("OPENAI_API_KEY")
-                        .map_err(|_| LlmError::Builder("Missing OPENAI_API_KEY environment variable".to_string()))?,
-                    _ => return Err(LlmError::Builder("Can't load API Key for unsupported Provider".to_string())),
+            ApiKey::Default => match self.provider.as_deref() {
+                Some("openai") => env::var("OPENAI_API_KEY").map_err(|_| {
+                    LlmError::Builder("Missing OPENAI_API_KEY environment variable".to_string())
+                })?,
+                _ => {
+                    return Err(LlmError::Builder(
+                        "Can't load API Key for unsupported Provider".to_string(),
+                    ));
                 }
-            }
+            },
             ApiKey::Custom(custom_key) => custom_key,
         };
 
@@ -111,7 +114,9 @@ impl LlmBuilder<Configuring> {
     }
 }
 
-fn validate_builder(builder: &LlmBuilder<MessagesSet>) -> Result<(&Vec<Message>, &str), LlmError> {
+fn validate_builder(
+    builder: &LlmBuilder<MessagesSet>,
+) -> Result<(&Vec<Message>, &str, &str), LlmError> {
     builder.api_key.as_ref().ok_or(LlmError::Builder(
         "Missing API key. Make sure to specify an API key.".into(),
     ))?;
@@ -128,7 +133,11 @@ fn validate_builder(builder: &LlmBuilder<MessagesSet>) -> Result<(&Vec<Message>,
         "Missing provider. Make sure to specify a provider.".into(),
     ))?;
 
-    Ok((messages, provider))
+    let model = builder.model.as_ref().ok_or(LlmError::Builder(
+        "Missing model. Make sure to specify a model.".into(),
+    ))?;
+
+    Ok((messages, provider, model))
 }
 
 impl LlmBuilder<MessagesSet> {
@@ -137,7 +146,9 @@ impl LlmBuilder<MessagesSet> {
         // TODO: Understand why this is necesary here.
         T: for<'a> Deserialize<'a> + Send,
     {
-        let (messages, provider) = validate_builder(&self)?;
+        let (messages, provider, model) = validate_builder(&self)?;
+        // Yes.. I am also throwing up.. let me fix that later.
+        let model_string = model.to_string();
         // Cloning is fine, since we don't want to modify the original messages.
         let messages = messages.to_vec();
 
@@ -149,7 +160,10 @@ impl LlmBuilder<MessagesSet> {
                     self.set_api_key(&api_key);
                 }
 
-                let req = StructuredRequest { messages };
+                let req = StructuredRequest {
+                    model: model_string,
+                    messages,
+                };
                 let client = openai::create_openai_client_from_builder(&self)?;
                 let res = client.generate_structured::<T>(req).await?;
                 Ok(res.content)

@@ -70,9 +70,14 @@ impl LlmProvider for OpenAiClient {
             )));
         }
 
-        let api_res: OpenAiStructuredResponse = res
-            .json()
+        let response_text = res
+            .text()
             .await
+            .map_err(|e| LlmError::Network(format!("Failed to read response body: {}", e)))?;
+
+        eprintln!("OpenAI API Response: {}", response_text);
+
+        let api_res: OpenAiStructuredResponse = serde_json::from_str(&response_text)
             .map_err(|e| LlmError::Parse(format!("Failed to parse OpenAI response: {}", e)))?;
 
         create_core_structured_response(api_res)
@@ -80,20 +85,23 @@ impl LlmProvider for OpenAiClient {
 }
 
 #[derive(Debug, Serialize)]
-struct OpenAiMessage {
-    pub role: OpenAiChatRole,
-    pub content: String,
+struct OpenAiStructuredRequest {
+    model: String,
+    input: Vec<InputMessage>,
 }
 
 #[derive(Debug, Serialize)]
-enum OpenAiChatRole {
+#[serde(rename_all = "snake_case")]
+enum InputMessageRole {
     System,
     User,
     Assistant,
 }
+
 #[derive(Debug, Serialize)]
-struct OpenAiStructuredRequest {
-    pub messages: Vec<OpenAiMessage>,
+struct InputMessage {
+    role: InputMessageRole,
+    content: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,7 +109,7 @@ struct OpenAiStructuredResponse {
     id: String,
     model: String,
     output: Vec<Message>,
-    pub usage: Usage,
+    usage: Usage,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,7 +129,7 @@ struct Message {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, rename_all = "snake_case")]
 enum MessageContent {
     OutputText(OutputText),
     Refusal(Refusal),
@@ -129,8 +137,6 @@ enum MessageContent {
 
 #[derive(Debug, Deserialize)]
 struct OutputText {
-    id: String,
-
     /// Always `output_text`
     #[serde(rename = "type")]
     c_type: String,
@@ -184,20 +190,23 @@ pub fn create_openai_client_from_builder(
 }
 
 fn create_openai_structured_request(req: StructuredRequest) -> OpenAiStructuredRequest {
-    let messages = req
+    let input = req
         .messages
         .into_iter()
-        .map(|m| OpenAiMessage {
+        .map(|m| InputMessage {
             role: match m.role {
-                core::types::ChatRole::System => OpenAiChatRole::System,
-                core::types::ChatRole::User => OpenAiChatRole::User,
-                core::types::ChatRole::Assistant => OpenAiChatRole::Assistant,
+                core::types::ChatRole::System => InputMessageRole::System,
+                core::types::ChatRole::User => InputMessageRole::User,
+                core::types::ChatRole::Assistant => InputMessageRole::Assistant,
             },
             content: m.content,
         })
         .collect();
 
-    OpenAiStructuredRequest { messages }
+    OpenAiStructuredRequest {
+        model: req.model,
+        input,
+    }
 }
 
 fn create_core_structured_response<T>(
