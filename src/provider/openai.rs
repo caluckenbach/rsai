@@ -165,8 +165,8 @@ struct Usage {
     total_tokens: i32,
 }
 
-pub fn create_openai_client_from_builder<T>(
-    builder: &LlmBuilder<MessagesSet, T>,
+pub fn create_openai_client_from_builder(
+    builder: &LlmBuilder<MessagesSet>,
 ) -> Result<OpenAiClient, LlmError> {
     // Setting the model should be optional
     let model = builder
