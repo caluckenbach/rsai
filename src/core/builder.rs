@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
-use crate::provider::openai;
+use crate::provider::openai::{self};
 
 use super::{
     error::LlmError,
-    traits::ChatCompletion,
-    types::{ChatCompletionRequest, Message},
+    traits::LlmProvider,
+    types::{Message, StructuredRequest},
 };
 
 // TODO: Hide the states
@@ -14,12 +14,28 @@ pub struct ProviderSet;
 pub struct Configuring;
 pub struct MessagesSet;
 
-pub struct LlmBuilder<State, T = String> {
+// Is it fine to init this with the unit type?
+pub struct LlmBuilder<State, T = ()> {
     provider: Option<String>,
     model: Option<String>,
     messages: Option<Vec<Message>>,
+    api_key: Option<String>,
     _state: PhantomData<State>,
     _response: PhantomData<T>,
+}
+
+impl<State> LlmBuilder<State> {
+    pub(crate) fn get_model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    pub(crate) fn get_messages(&self) -> Option<&Vec<Message>> {
+        self.messages.as_ref()
+    }
+
+    pub(crate) fn get_api_key(&self) -> Option<&str> {
+        self.api_key.as_deref()
+    }
 }
 
 impl LlmBuilder<Init> {
@@ -29,10 +45,11 @@ impl LlmBuilder<Init> {
                 provider: Some(provider.to_string()),
                 model: None,
                 messages: None,
+                api_key: None,
                 _state: PhantomData,
                 _response: PhantomData,
             }),
-            _ => Err(LlmError::BuilderError("Unsupported Provider".to_string())),
+            _ => Err(LlmError::Builder("Unsupported Provider".to_string())),
         }
     }
 }
@@ -43,6 +60,7 @@ impl LlmBuilder<ProviderSet> {
             provider: self.provider,
             model: Some(model_id.to_string()),
             messages: None,
+            api_key: None,
             _state: PhantomData,
             _response: PhantomData,
         }
@@ -55,6 +73,7 @@ impl<T> LlmBuilder<Configuring, T> {
             provider: self.provider,
             model: self.model,
             messages: self.messages,
+            api_key: None,
             _state: PhantomData,
             _response: PhantomData,
         }
@@ -65,30 +84,46 @@ impl<T> LlmBuilder<Configuring, T> {
             provider: self.provider,
             model: self.model,
             messages: Some(messages),
+            api_key: None,
             _state: PhantomData,
             _response: PhantomData,
         }
     }
 }
 
+fn validate_builder<T>(
+    builder: &LlmBuilder<MessagesSet, T>,
+) -> Result<(&Vec<Message>, &str), LlmError> {
+    let messages = builder
+        .messages
+        .as_ref()
+        .filter(|messages| !messages.is_empty())
+        .ok_or(LlmError::Builder(
+            "Missing messages. Make sure to add at least one message.".to_string(),
+        ))?;
+
+    let provider = builder.provider.as_ref().ok_or(LlmError::Builder(
+        "Missing provider. Make sure to specify a provider.".into(),
+    ))?;
+
+    Ok((messages, provider))
+}
+
 impl<T> LlmBuilder<MessagesSet, T>
 where
-    T: serde::de::DeserializeOwned,
+    T: serde::de::DeserializeOwned + Send + 'static,
 {
     pub async fn send(self) -> Result<T, LlmError> {
-        let request = ChatCompletionRequest {
-            messages: self.messages.ok_or(LlmError::BuilderError(
-                "Missing messages. Make sure to define at least one message.".into(),
-            ))?,
-        };
-        let provider = self.provider.ok_or(LlmError::BuilderError(
-            "Missing provider. Make sure to specify a provider.".into(),
-        ))?;
-        match provider.as_str() {
+        let (messages, provider) = validate_builder(&self).await?;
+
+        match provider {
             "openai" => {
-                let prov = openai::create_provider_from_builder(&self)?;
-                let response = prov.complete(&request).await?;
-                Ok(response)
+                let req = StructuredRequest {
+                    messages: messages.to_vec(),
+                };
+                let client = openai::create_openai_client_from_builder(&self)?;
+                let res = client.generate_structured::<T>(req).await?;
+                Ok(res.content)
             }
             _ => todo!(),
         }
@@ -103,6 +138,7 @@ pub mod llm {
             provider: None,
             model: None,
             messages: None,
+            api_key: None,
             _state: PhantomData,
             _response: PhantomData,
         }
