@@ -13,6 +13,7 @@ pub enum ChatRole {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructuredRequest {
+    pub model: String,
     pub messages: Vec<Message>,
 }
 
@@ -28,4 +29,3 @@ pub struct LanguageModelUsage {
     pub completion_tokens: i32,
     pub total_tokens: i32,
 }
-
