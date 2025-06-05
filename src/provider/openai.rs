@@ -71,14 +71,9 @@ impl LlmProvider for OpenAiClient {
             )));
         }
 
-        let response_text = res
-            .text()
+        let api_res: OpenAiStructuredResponse = res
+            .json()
             .await
-            .map_err(|e| LlmError::Network(format!("Failed to read response body: {}", e)))?;
-
-        eprintln!("OpenAI API Response: {}", response_text);
-
-        let api_res: OpenAiStructuredResponse = serde_json::from_str(&response_text)
             .map_err(|e| LlmError::Parse(format!("Failed to parse OpenAI response: {}", e)))?;
 
         create_core_structured_response(api_res)
@@ -93,9 +88,17 @@ struct OpenAiStructuredRequest {
 }
 
 #[derive(Debug, Serialize)]
+struct Format {
+    format: FormatType,
+}
+
+#[derive(Debug, Serialize)]
 #[serde(untagged, rename_all = "snake_case")]
-enum Format {
-    Text(TextType),
+enum FormatType {
+    Text {
+        #[serde(rename = "type")]
+        r#type: TextType,
+    },
     JsonSchema(JsonSchema),
 }
 
@@ -261,7 +264,9 @@ where
     Ok(OpenAiStructuredRequest {
         model: req.model,
         input,
-        text: Format::JsonSchema(schema),
+        text: Format {
+            format: FormatType::JsonSchema(schema),
+        },
     })
 }
 
