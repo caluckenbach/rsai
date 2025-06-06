@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-#[derive(Debug, Error, Clone)]
+#[derive(Debug, Error)]
 pub enum LlmError {
     #[error("LLM-Builder error: {0}")]
     Builder(String),
@@ -8,15 +8,32 @@ pub enum LlmError {
     #[error("Provider configuration error: {0}")]
     ProviderConfiguration(String),
 
-    #[error("Provider error: {0}")]
-    Provider(String),
+    #[error("Provider error: {message}")]
+    Provider {
+        message: String,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
 
-    #[error("Network error: {0}")]
-    Network(String),
+    #[error("Network error: {message}")]
+    Network {
+        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 
-    #[error("API error: {0}")]
-    Api(String),
+    #[error("API error: {message}")]
+    Api {
+        message: String,
+        status_code: Option<u16>,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
 
-    #[error("Parse error: {0}")]
-    Parse(String),
+    #[error("Parse error: {message}")]
+    Parse {
+        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
 }

@@ -69,26 +69,37 @@ impl LlmProvider for OpenAiClient {
             .json(&request)
             .send()
             .await
-            .map_err(|e| LlmError::Network(format!("Failed to complete request: {}", e)))?;
+            .map_err(|e| LlmError::Network {
+                message: "Failed to complete request".to_string(),
+                source: Box::new(e),
+            })?;
 
         if !res.status().is_success() {
             let status = res.status();
             let error_text = res
                 .text()
                 .await
-                .map_err(|e| LlmError::Api(format!("Failed to get the response text: {}", e)))?
+                .map_err(|e| LlmError::Api {
+                    message: "Failed to get the response text".to_string(),
+                    status_code: Some(status.as_u16()),
+                    source: Some(Box::new(e)),
+                })?
                 .clone();
 
-            return Err(LlmError::Api(format!(
-                "OpenAI API returned error: status code {} - {}",
-                status, error_text
-            )));
+            return Err(LlmError::Api {
+                message: format!("OpenAI API returned error: {}", error_text),
+                status_code: Some(status.as_u16()),
+                source: None,
+            });
         }
 
         let api_res: OpenAiStructuredResponse = res
             .json()
             .await
-            .map_err(|e| LlmError::Parse(format!("Failed to parse OpenAI response: {}", e)))?;
+            .map_err(|e| LlmError::Parse {
+                message: "Failed to parse OpenAI response".to_string(),
+                source: Box::new(e),
+            })?;
 
         create_core_structured_response(api_res)
     }
@@ -264,12 +275,18 @@ where
         .as_ref()
         .and_then(|meta| meta.title.as_ref())
         .ok_or_else(|| {
-            LlmError::Parse("Failed to build JSON Schema: Missing schema name".to_string())
+            LlmError::Provider {
+                message: "Failed to build JSON Schema: Missing schema name".to_string(),
+                source: None,
+            }
         })?
         .clone();
 
     let mut schema_value = serde_json::to_value(&s)
-        .map_err(|e| LlmError::Parse(format!("Failed to build JSON Schema: {}", e)))?;
+        .map_err(|e| LlmError::Parse {
+            message: "Failed to build JSON Schema".to_string(),
+            source: Box::new(e),
+        })?;
 
     let needs_wrapping = schema_value
         .get("type")
@@ -312,17 +329,27 @@ where
     let message = res
         .output
         .first()
-        .ok_or_else(|| LlmError::Parse("No messages in response".to_string()))?;
+        .ok_or_else(|| LlmError::Provider {
+            message: "No messages in response".to_string(),
+            source: None,
+        })?;
 
     let content = message
         .content
         .first()
-        .ok_or_else(|| LlmError::Parse("No content in message".to_string()))?;
+        .ok_or_else(|| LlmError::Provider {
+            message: "No content in message".to_string(),
+            source: None,
+        })?;
 
     let text = match content {
         MessageContent::OutputText(output) => &output.text,
         MessageContent::Refusal(refusal) => {
-            return Err(LlmError::Api(format!("Model refused: {}", refusal.refusal)));
+            return Err(LlmError::Api {
+                message: format!("Model refused: {}", refusal.refusal),
+                status_code: None,
+                source: None,
+            });
         }
     };
 
@@ -331,7 +358,10 @@ where
         wrapped.value
     } else {
         serde_json::from_str(&text)
-            .map_err(|e| LlmError::Parse(format!("Failed to parse structured output: {}", e)))?
+            .map_err(|e| LlmError::Parse {
+                message: "Failed to parse structured output".to_string(),
+                source: Box::new(e),
+            })?
     };
 
     Ok(StructuredResponse {
