@@ -1,41 +1,28 @@
-use ai::completion_schema;
-use ai::core::{
-    builder::{ApiKey, llm},
-    types::{ChatRole, Message},
-};
+use ai::{completion_schema, llm, Message, ChatRole, ApiKey};
 use dotenv::dotenv;
 
 #[completion_schema]
-struct Foo {
-    bar: i32,
-}
-
-#[derive(Debug)]
-#[completion_schema]
-enum Model {
-    Default,
-    Reasoning,
-    Research,
+struct Analysis {
+    sentiment: String,
+    confidence: f32,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
-    let messages: Vec<Message> = vec![Message {
-        role: ChatRole::User,
-        content: "Pick the AI model that fits best for the following query: Which city is the capital of Germany".to_string(),
-    }];
-
-    let result = llm::call()
+    let analysis = llm::call()
         .provider("openai")?
         .api_key(ApiKey::Default)?
         .model("gpt-4o-mini")
-        .messages(messages)
-        .complete::<Foo>()
+        .messages(vec![Message {
+            role: ChatRole::User,
+            content: "Analyze: 'This library is amazing!'".to_string(),
+        }])
+        .complete::<Analysis>()
         .await?;
 
-    println!("Selected model: {:?}", result.bar);
+    println!("Sentiment: {}, Confidence: {}", analysis.sentiment, analysis.confidence);
 
     Ok(())
 }
