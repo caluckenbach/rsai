@@ -6,6 +6,14 @@ use async_trait::async_trait;
 use schemars::schema_for;
 use serde::{Deserialize, Serialize};
 
+/// Wrapper for non-object JSON Schema types (enums, strings, numbers, etc.)
+/// OpenAI's structured output API requires the root schema to be an object,
+/// so we wrap non-object types in an object with a "value" property.
+#[derive(Deserialize)]
+struct ValueWrapper<T> {
+    value: T,
+}
+
 use crate::core::{
     builder::{LlmBuilder, MessagesSet},
     error::LlmError,
@@ -64,10 +72,16 @@ impl LlmProvider for OpenAiClient {
             .map_err(|e| LlmError::Network(format!("Failed to complete request: {}", e)))?;
 
         if !res.status().is_success() {
-            // TODO: Handle error response from OpenAI API
+            let status = res.status();
+            let error_text = res
+                .text()
+                .await
+                .map_err(|e| LlmError::Api(format!("Failed to get the response text: {}", e)))?
+                .clone();
+
             return Err(LlmError::Api(format!(
-                "OpenAI API returned error: status code {}",
-                res.status()
+                "OpenAI API returned error: status code {} - {}",
+                status, error_text
             )));
         }
 
@@ -254,10 +268,29 @@ where
         })?
         .clone();
 
+    let mut schema_value = serde_json::to_value(&s)
+        .map_err(|e| LlmError::Parse(format!("Failed to build JSON Schema: {}", e)))?;
+
+    let needs_wrapping = schema_value
+        .get("type")
+        .and_then(|t| t.as_str())
+        .map(|t| t != "object")
+        .unwrap_or(false);
+
+    if needs_wrapping {
+        schema_value = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": schema_value
+            },
+            "required": ["value"],
+            "additionalProperties": false
+        })
+    }
+
     let schema = JsonSchema {
         name: schema_name,
-        schema: serde_json::to_value(&s)
-            .map_err(|e| LlmError::Parse(format!("Failed to build JSON Schema: {}", e)))?,
+        schema: schema_value,
         j_type: JsonSchemaType::JsonSchema,
     };
 
@@ -293,8 +326,13 @@ where
         }
     };
 
-    let parsed_content: T = serde_json::from_str(&text)
-        .map_err(|e| LlmError::Parse(format!("Failed to parse structured output: {}", e)))?;
+    // Try to parse as wrapped value first, then fall back to direct parsing
+    let parsed_content: T = if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
+        wrapped.value
+    } else {
+        serde_json::from_str(&text)
+            .map_err(|e| LlmError::Parse(format!("Failed to parse structured output: {}", e)))?
+    };
 
     Ok(StructuredResponse {
         content: parsed_content,

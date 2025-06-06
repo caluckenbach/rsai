@@ -1,9 +1,14 @@
+[workspace]
+members = [".", "ai-macros"]
+resolver = "2"
+
 [package]
 name = "ai"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ai-macros = { path = "ai-macros" }
 async-trait = "0.1.87"
 bytes = "1.10.1"
 futures = "0.3.31"
@@ -22,7 +27,3 @@ dotenv = "0.15.0"
 [[example]]
 name = "simple-chat"
 path = "examples/simple-chat/main.rs"
-
-[[example]]
-name = "stream-chat"
-path = "examples/stream-chat/main.rs"
