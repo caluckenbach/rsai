@@ -10,14 +10,16 @@ use super::{
     types::{Message, StructuredRequest},
 };
 
-// TODO: Hide the states
-pub struct Init;
-pub struct ProviderSet;
-pub struct ApiKeySet;
-pub struct Configuring;
-pub struct MessagesSet;
+mod private {
+    pub struct Init;
+    pub struct ProviderSet;
+    pub struct ApiKeySet;
+    pub struct Configuring;
+    pub struct MessagesSet;
+}
 
-// Is it fine to init this with the unit type?
+/// A type-safe builder for constructing LLM requests using the builder pattern.
+/// The builder enforces correct construction order through phantom types.
 pub struct LlmBuilder<State> {
     provider: Option<String>,
     model: Option<String>,
@@ -44,8 +46,10 @@ impl<State> LlmBuilder<State> {
     }
 }
 
-impl LlmBuilder<Init> {
-    pub fn provider(self, provider: &str) -> Result<LlmBuilder<ProviderSet>, LlmError> {
+impl LlmBuilder<private::Init> {
+    /// Set the provider for the LLM request.
+    /// Currently supports "openai".
+    pub fn provider(self, provider: &str) -> Result<LlmBuilder<private::ProviderSet>, LlmError> {
         match provider {
             "openai" => Ok(LlmBuilder {
                 provider: Some(provider.to_string()),
@@ -59,13 +63,18 @@ impl LlmBuilder<Init> {
     }
 }
 
+/// Configuration for API key source
 pub enum ApiKey {
+    /// Use the default environment variable for the provider
     Default,
+    /// Use a custom API key string
     Custom(String),
 }
 
-impl LlmBuilder<ProviderSet> {
-    pub fn api_key(self, api_key: ApiKey) -> Result<LlmBuilder<ApiKeySet>, LlmError> {
+impl LlmBuilder<private::ProviderSet> {
+    /// Set the API key for the provider.
+    /// Use `ApiKey::Default` to load from environment variables or `ApiKey::Custom` for a custom key.
+    pub fn api_key(self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet>, LlmError> {
         let key = match api_key {
             ApiKey::Default => match self.provider.as_deref() {
                 Some("openai") => env::var("OPENAI_API_KEY").map_err(|_| {
@@ -90,8 +99,9 @@ impl LlmBuilder<ProviderSet> {
     }
 }
 
-impl LlmBuilder<ApiKeySet> {
-    pub fn model(self, model_id: &str) -> LlmBuilder<Configuring> {
+impl LlmBuilder<private::ApiKeySet> {
+    /// Set the model to use for the LLM request.
+    pub fn model(self, model_id: &str) -> LlmBuilder<private::Configuring> {
         LlmBuilder {
             provider: self.provider,
             model: Some(model_id.to_string()),
@@ -102,8 +112,9 @@ impl LlmBuilder<ApiKeySet> {
     }
 }
 
-impl LlmBuilder<Configuring> {
-    pub fn messages(self, messages: Vec<Message>) -> LlmBuilder<MessagesSet> {
+impl LlmBuilder<private::Configuring> {
+    /// Set the messages for the conversation.
+    pub fn messages(self, messages: Vec<Message>) -> LlmBuilder<private::MessagesSet> {
         LlmBuilder {
             provider: self.provider,
             model: self.model,
@@ -115,7 +126,7 @@ impl LlmBuilder<Configuring> {
 }
 
 fn validate_builder(
-    builder: &LlmBuilder<MessagesSet>,
+    builder: &LlmBuilder<private::MessagesSet>,
 ) -> Result<(&Vec<Message>, &str, &str), LlmError> {
     builder.api_key.as_ref().ok_or(LlmError::Builder(
         "Missing API key. Make sure to specify an API key.".into(),
@@ -140,7 +151,33 @@ fn validate_builder(
     Ok((messages, provider, model))
 }
 
-impl LlmBuilder<MessagesSet> {
+impl LlmBuilder<private::MessagesSet> {
+    /// Execute the LLM request and return structured output of type T.
+    /// The type T must implement Deserialize and JsonSchema for structured output generation as well as
+    /// be annotated with `#[schemars(deny_unknown_fields)]`.
+    /// Use the `completion_schema` attribute macro to easily define structured output types.
+    ///
+    /// # Example
+    /// ```
+    /// use ai::{completion_schema, llm, Message, ChatRole, ApiKey};
+    ///
+    /// #[completion_schema]
+    /// struct Analysis {
+    ///     sentiment: String,
+    ///     confidence: f32,
+    /// }
+    ///
+    /// let analysis = llm::call()
+    ///     .provider("openai")?
+    ///     .api_key(ApiKey::Default)?
+    ///     .model("gpt-4o-mini")
+    ///     .messages(vec![Message {
+    ///         role: ChatRole::User,
+    ///         content: "Analyze: 'This library is amazing!'".to_string(),
+    ///     }])
+    ///     .complete::<Analysis>()
+    ///     .await?;
+    /// ```
     pub async fn complete<T>(mut self) -> Result<T, LlmError>
     where
         // TODO: Understand why this is necesary here.
@@ -173,10 +210,12 @@ impl LlmBuilder<MessagesSet> {
     }
 }
 
+/// Module containing the main entry point for building LLM requests
 pub mod llm {
     use super::*;
 
-    pub fn call() -> LlmBuilder<Init> {
+    /// Create a new LLM builder to start constructing a request
+    pub fn call() -> LlmBuilder<private::Init> {
         LlmBuilder {
             provider: None,
             model: None,

@@ -15,7 +15,7 @@ struct ValueWrapper<T> {
 }
 
 use crate::core::{
-    builder::{LlmBuilder, MessagesSet},
+    builder::LlmBuilder,
     error::LlmError,
     traits::LlmProvider,
 };
@@ -219,8 +219,8 @@ struct Usage {
     total_tokens: i32,
 }
 
-pub fn create_openai_client_from_builder(
-    builder: &LlmBuilder<MessagesSet>,
+pub fn create_openai_client_from_builder<State>(
+    builder: &LlmBuilder<State>,
 ) -> Result<OpenAiClient, LlmError> {
     // Setting the model should be optional
     let model = builder
