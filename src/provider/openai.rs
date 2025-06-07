@@ -105,9 +105,15 @@ struct OpenAiStructuredRequest {
     model: String,
     input: Vec<InputMessage>,
     text: Format,
-    parallel_tool_calls: bool,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parallel_tool_calls: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<ToolChoice>,
-    tools: Box<[Tool]>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tools: Option<Box<[Tool]>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -150,7 +156,7 @@ struct FunctionToolChoice {
     name: String,
 
     #[serde(rename = "type")]
-    r#type: FunctionTool,
+    r#type: FunctionType,
 }
 
 #[derive(Debug, Serialize)]
@@ -378,15 +384,31 @@ where
         r#type: JsonSchemaType::JsonSchema,
     };
 
+    let tools = if let Some(req_tools) = req.tools {
+        let tools = req_tools
+            .iter()
+            .map(create_function_tool)
+            .collect::<Box<[Tool]>>();
+        Some(tools)
+    } else {
+        None
+    };
+
+    let tool_choice = if let Some(req_tool_choice) = req.tool_choice {
+        Some(create_function_tool_choice(req_tool_choice))
+    } else {
+        None
+    };
+
     Ok(OpenAiStructuredRequest {
         model: req.model,
         input,
         text: Format {
             format: FormatType::JsonSchema(schema),
         },
-        parallel_tool_calls: todo!(),
-        tool_choice: todo!(),
-        tools: todo!(),
+        tools,
+        tool_choice,
+        parallel_tool_calls: req.parallel_tool_calls,
     })
 }
 
@@ -440,4 +462,28 @@ where
             id: res.id,
         },
     })
+}
+
+fn create_function_tool(tool: &core::types::Tool) -> Tool {
+    Tool::Function(FunctionTool {
+        name: tool.name.clone(),
+        parameters: tool.parameters.clone(),
+        strict: tool.strict.unwrap_or(true),
+        r#type: FunctionType::Function,
+        description: tool.description.clone(),
+    })
+}
+
+fn create_function_tool_choice(tool_choice: core::types::ToolChoice) -> ToolChoice {
+    match tool_choice {
+        core::types::ToolChoice::None => ToolChoice::Mode(ToolMode::None),
+        core::types::ToolChoice::Auto => ToolChoice::Mode(ToolMode::Auto),
+        core::types::ToolChoice::Required => ToolChoice::Mode(ToolMode::Required),
+        core::types::ToolChoice::Function { name } => {
+            ToolChoice::Definite(ToolChoiceDefinite::Function(FunctionToolChoice {
+                name,
+                r#type: FunctionType::Function,
+            }))
+        }
+    }
 }
