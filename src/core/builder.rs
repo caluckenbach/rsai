@@ -6,11 +6,15 @@ use crate::provider::openai::{self};
 
 use super::{
     error::LlmError,
-    traits::LlmProvider,
     types::{Message, StructuredRequest, Tool, ToolChoice},
 };
 
 mod private {
+    use crate::core::types::{LlmResponse, StructuredRequest, StructuredResponse};
+    use crate::core::error::LlmError;
+    use crate::core::traits::LlmProvider;
+    use crate::provider::openai::OpenAiClient;
+    
     pub struct Init;
     pub struct ProviderSet;
     pub struct ApiKeySet;
@@ -19,9 +23,44 @@ mod private {
     pub struct ToolsSet;
 
     /// Marker trait for states that can execute complete() requests
-    pub trait CompletableState {}
-    impl CompletableState for MessagesSet {}
-    impl CompletableState for ToolsSet {}
+    pub trait CompletableState {
+        type Output<T>;
+        
+        async fn execute_request<T>(
+            client: &OpenAiClient,
+            request: StructuredRequest,
+        ) -> Result<Self::Output<T>, LlmError>
+        where
+            T: serde::de::DeserializeOwned + Send + schemars::JsonSchema;
+    }
+    
+    impl CompletableState for MessagesSet {
+        type Output<T> = StructuredResponse<T>;
+        
+        async fn execute_request<T>(
+            client: &OpenAiClient,
+            request: StructuredRequest,
+        ) -> Result<Self::Output<T>, LlmError>
+        where
+            T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+        {
+            client.generate_structured(request).await
+        }
+    }
+    
+    impl CompletableState for ToolsSet {
+        type Output<T> = LlmResponse<T>;
+        
+        async fn execute_request<T>(
+            client: &OpenAiClient,
+            request: StructuredRequest,
+        ) -> Result<Self::Output<T>, LlmError>
+        where
+            T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+        {
+            client.generate(request).await
+        }
+    }
 }
 
 /// A type-safe builder for constructing LLM requests using the builder pattern.
@@ -198,7 +237,7 @@ where
     ///     .complete::<Analysis>()
     ///     .await?;
     /// ```
-    pub async fn complete<T>(mut self) -> Result<T, LlmError>
+    pub async fn complete<T>(mut self) -> Result<State::Output<T>, LlmError>
     where
         T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
     {
@@ -222,8 +261,7 @@ where
                     parallel_tool_calls: self.parallel_tool_calls,
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
-                let res = client.generate_structured::<T>(req).await?;
-                Ok(res.content)
+                State::execute_request(&client, req).await
             }
             _ => todo!(),
         }
