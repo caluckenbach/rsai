@@ -105,6 +105,81 @@ struct OpenAiStructuredRequest {
     model: String,
     input: Vec<InputMessage>,
     text: Format,
+    parallel_tool_calls: bool,
+    tool_choice: Option<ToolChoice>,
+    tools: Box<[Tool]>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum ToolChoice {
+    Mode(ToolMode),
+    Definite(ToolChoiceDefinite),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolMode {
+    None,
+    Auto,
+    Required,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum ToolChoiceDefinite {
+    Hosted(HostedToolChoice),
+    Function(FunctionToolChoice),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum HostedToolChoice {
+    // FileSearch,
+    // WebSearchPreview,
+    // ComputerUsePreview,
+    // CodeInterpreter,
+    // Mcp,
+    // ImageGeneration,
+}
+
+#[derive(Debug, Serialize)]
+/// Use this option to force the model to call a specific function.
+struct FunctionToolChoice {
+    /// The name of the function to call.
+    name: String,
+
+    #[serde(rename = "type")]
+    r#type: FunctionTool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum Tool {
+    Function(FunctionTool),
+    // TODO: Add file search tool
+    // TODO: Add web search tool
+    // TODO: Add computer use tool
+    // TODO: Add MCP Tool
+    // TODO: Add code interpreter tool
+    // TODO: Add image generation tool
+    // TODO: Add local shell tool
+}
+
+#[derive(Debug, Serialize)]
+struct FunctionTool {
+    name: String,
+    parameters: serde_json::Value,
+    strict: bool,
+    #[serde(rename = "type")]
+    r#type: FunctionType,
+    description: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum FunctionType {
+    Function,
 }
 
 #[derive(Debug, Serialize)]
@@ -309,6 +384,9 @@ where
         text: Format {
             format: FormatType::JsonSchema(schema),
         },
+        parallel_tool_calls: todo!(),
+        tool_choice: todo!(),
+        tools: todo!(),
     })
 }
 
