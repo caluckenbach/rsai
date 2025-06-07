@@ -14,11 +14,9 @@ struct ValueWrapper<T> {
     value: T,
 }
 
-use crate::core::{
-    builder::LlmBuilder,
-    error::LlmError,
-    traits::LlmProvider,
-};
+use crate::core::{builder::LlmBuilder, error::LlmError, traits::LlmProvider};
+
+use super::Provider;
 
 pub struct OpenAiClient {
     api_key: String,
@@ -93,13 +91,10 @@ impl LlmProvider for OpenAiClient {
             });
         }
 
-        let api_res: OpenAiStructuredResponse = res
-            .json()
-            .await
-            .map_err(|e| LlmError::Parse {
-                message: "Failed to parse OpenAI response".to_string(),
-                source: Box::new(e),
-            })?;
+        let api_res: OpenAiStructuredResponse = res.json().await.map_err(|e| LlmError::Parse {
+            message: "Failed to parse OpenAI response".to_string(),
+            source: Box::new(e),
+        })?;
 
         create_core_structured_response(api_res)
     }
@@ -274,19 +269,16 @@ where
         .metadata
         .as_ref()
         .and_then(|meta| meta.title.as_ref())
-        .ok_or_else(|| {
-            LlmError::Provider {
-                message: "Failed to build JSON Schema: Missing schema name".to_string(),
-                source: None,
-            }
+        .ok_or_else(|| LlmError::Provider {
+            message: "Failed to build JSON Schema: Missing schema name".to_string(),
+            source: None,
         })?
         .clone();
 
-    let mut schema_value = serde_json::to_value(&s)
-        .map_err(|e| LlmError::Parse {
-            message: "Failed to build JSON Schema".to_string(),
-            source: Box::new(e),
-        })?;
+    let mut schema_value = serde_json::to_value(&s).map_err(|e| LlmError::Parse {
+        message: "Failed to build JSON Schema".to_string(),
+        source: Box::new(e),
+    })?;
 
     let needs_wrapping = schema_value
         .get("type")
@@ -326,21 +318,15 @@ fn create_core_structured_response<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let message = res
-        .output
-        .first()
-        .ok_or_else(|| LlmError::Provider {
-            message: "No messages in response".to_string(),
-            source: None,
-        })?;
+    let message = res.output.first().ok_or_else(|| LlmError::Provider {
+        message: "No messages in response".to_string(),
+        source: None,
+    })?;
 
-    let content = message
-        .content
-        .first()
-        .ok_or_else(|| LlmError::Provider {
-            message: "No content in message".to_string(),
-            source: None,
-        })?;
+    let content = message.content.first().ok_or_else(|| LlmError::Provider {
+        message: "No content in message".to_string(),
+        source: None,
+    })?;
 
     let text = match content {
         MessageContent::OutputText(output) => &output.text,
@@ -357,11 +343,10 @@ where
     let parsed_content: T = if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
         wrapped.value
     } else {
-        serde_json::from_str(&text)
-            .map_err(|e| LlmError::Parse {
-                message: "Failed to parse structured output".to_string(),
-                source: Box::new(e),
-            })?
+        serde_json::from_str(&text).map_err(|e| LlmError::Parse {
+            message: "Failed to parse structured output".to_string(),
+            source: Box::new(e),
+        })?
     };
 
     Ok(StructuredResponse {
@@ -370,6 +355,11 @@ where
             prompt_tokens: res.usage.input_tokens,
             completion_tokens: res.usage.output_tokens,
             total_tokens: res.usage.total_tokens,
+        },
+        metadata: core::types::ResponseMetadata {
+            provider: Provider::OpenAI,
+            model: res.model,
+            id: res.id,
         },
     })
 }

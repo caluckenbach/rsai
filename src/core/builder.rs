@@ -180,7 +180,6 @@ impl LlmBuilder<private::MessagesSet> {
     /// ```
     pub async fn complete<T>(mut self) -> Result<T, LlmError>
     where
-        // TODO: Understand why this is necesary here.
         T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
     {
         let (messages, provider, model) = validate_builder(&self)?;

@@ -1,3 +1,5 @@
+use crate::provider::Provider;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Message {
     pub role: ChatRole,
@@ -21,6 +23,7 @@ pub struct StructuredRequest {
 pub struct StructuredResponse<T> {
     pub content: T,
     pub usage: LanguageModelUsage,
+    pub metadata: ResponseMetadata,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,4 +31,11 @@ pub struct LanguageModelUsage {
     pub prompt_tokens: i32,
     pub completion_tokens: i32,
     pub total_tokens: i32,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ResponseMetadata {
+    pub provider: Provider,
+    pub model: String,
+    pub id: String,
 }
