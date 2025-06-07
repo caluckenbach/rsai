@@ -11,17 +11,21 @@ mod tools;
 /// - `#[schemars(deny_unknown_fields)]`
 ///
 /// Usage:
-/// ```rust
+/// ```rust,ignore
+/// use ai_macros::completion_schema;
+///
 /// #[completion_schema]
 /// struct Response {
 ///     answer: String,
 /// }
 ///
-/// let result = llm.complete::<Response>().await?;
+/// // The macro expands to:
+/// #[derive(serde::Deserialize, schemars::JsonSchema)]
+/// #[schemars(deny_unknown_fields)]
+/// struct Response {
+///     answer: String,
+/// }
 /// ```
-///
-/// NOTE: This macro implementation was generated via Claude Code
-/// and still needs to be double-checked for correctness and edge cases
 #[proc_macro_attribute]
 pub fn completion_schema(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let item_tokens: proc_macro2::TokenStream = item.into();
@@ -42,14 +46,14 @@ pub fn completion_schema(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Usage:
 /// ```rust
+/// use ai_macros::tool;
+///
 /// #[tool]
-/// async fn get_weather(
-///     /// The city to get weather for
-///     city: String,
-///     /// Temperature unit (celsius or fahrenheit)
-///     unit: Option<String>,
-/// ) -> Result<WeatherData, ToolError> {
-///     // Implementation
+/// /// Get current weather for a city
+/// /// city: The city to get weather for
+/// /// unit: Temperature unit (celsius or fahrenheit)
+/// fn get_weather(city: String, unit: Option<String>) -> String {
+///     format!("Weather for {}: 22°C", city)
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -67,13 +71,25 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Usage:
 /// ```rust
-/// #[tool]
-/// fn get_weather(city: String) -> Result<String, LlmError> { /* ... */ }
+/// use ai_macros::{tool, tools};
 ///
 /// #[tool]
-/// fn calculate_distance(from: String, to: String) -> Result<f64, LlmError> { /* ... */ }
+/// /// Get current weather for a city
+/// /// city: The city to get weather for
+/// fn get_weather(city: String) -> String {
+///     format!("Weather for {}: 22°C", city)
+/// }
 ///
-/// let tools = tools![get_weather, calculate_distance];
+/// #[tool]
+/// /// Calculate distance between two locations
+/// /// from: Starting location
+/// /// to: Destination location
+/// fn calculate_distance(from: String, to: String) -> f64 {
+///     42.5
+/// }
+///
+/// let toolset = tools![get_weather, calculate_distance];
+/// assert_eq!(toolset.tools.len(), 2);
 /// ```
 #[proc_macro]
 pub fn tools(input: TokenStream) -> TokenStream {

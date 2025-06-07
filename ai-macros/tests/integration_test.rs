@@ -1,63 +1,15 @@
-// Mock the ai_rs types for testing the macro in isolation
-mod ai_rs {
-    pub mod core {
-        pub mod types {
-            use std::future::Future;
-            use std::pin::Pin;
-
-            #[derive(Debug, Clone, PartialEq)]
-            pub struct Tool {
-                pub name: String,
-                pub description: Option<String>,
-                pub parameters: serde_json::Value,
-                pub strict: Option<bool>,
-            }
-
-            pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-        }
-
-        pub mod error {
-            #[derive(Debug)]
-            pub enum LlmError {
-                ToolExecution {
-                    message: String,
-                    source: Option<Box<dyn std::error::Error + Send + Sync>>,
-                },
-            }
-
-            impl std::fmt::Display for LlmError {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    match self {
-                        LlmError::ToolExecution { message, .. } => write!(f, "{}", message),
-                    }
-                }
-            }
-
-            impl std::error::Error for LlmError {}
-        }
-
-        pub trait ToolFunction: Send + Sync {
-            fn schema(&self) -> types::Tool;
-            fn execute<'a>(
-                &'a self,
-                params: serde_json::Value,
-            ) -> types::BoxFuture<'a, Result<serde_json::Value, error::LlmError>>;
-        }
-    }
-}
-
 use ai_macros::tool;
 
 #[tool]
 /// Get current temperature for a given location.
-/// location: City and country e.g. Bogotá, Colombia
-fn get_weather(location: String) -> f64 {
+/// _location: City and country e.g. Bogotá, Colombia
+fn get_weather(_location: String) -> f64 {
     22.5
 }
 
 #[test]
 fn test_get_weather_tool_schema() {
-    use ai_rs::core::ToolFunction;
+    use ai::core::ToolFunction;
     let tool_instance = GetWeatherTool;
     let tool = tool_instance.schema();
 
@@ -72,7 +24,7 @@ fn test_get_weather_tool_schema() {
     assert_eq!(params["type"], "object");
 
     let properties = &params["properties"];
-    let location_prop = &properties["location"];
+    let location_prop = &properties["_location"];
     assert_eq!(location_prop["type"], "string");
     assert_eq!(
         location_prop["description"],
@@ -81,7 +33,7 @@ fn test_get_weather_tool_schema() {
 
     let required = params["required"].as_array().unwrap();
     assert_eq!(required.len(), 1);
-    assert_eq!(required[0], "location");
+    assert_eq!(required[0], "_location");
 
     assert_eq!(params["additionalProperties"], false);
 
@@ -104,7 +56,7 @@ fn complex_function(param1: String, param2: Option<i32>, param3: bool) -> String
 
 #[test]
 fn test_complex_function_docstring_parsing() {
-    use ai_rs::core::ToolFunction;
+    use ai::core::ToolFunction;
     let tool_instance = ComplexFunctionTool;
     let tool = tool_instance.schema();
 

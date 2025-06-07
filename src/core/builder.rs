@@ -7,7 +7,7 @@ use crate::provider::openai::{self};
 use super::{
     error::LlmError,
     traits::LlmProvider,
-    types::{Message, StructuredRequest},
+    types::{Message, StructuredRequest, Tool, ToolChoice},
 };
 
 mod private {
@@ -25,6 +25,9 @@ pub struct LlmBuilder<State> {
     model: Option<String>,
     messages: Option<Vec<Message>>,
     api_key: Option<String>,
+    tools: Option<Box<[Tool]>>,
+    tool_choice: Option<ToolChoice>,
+    parallel_tool_calls: Option<bool>,
     _state: PhantomData<State>,
 }
 
@@ -56,6 +59,9 @@ impl LlmBuilder<private::Init> {
                 model: None,
                 messages: None,
                 api_key: None,
+                tools: None,
+                tool_choice: None,
+                parallel_tool_calls: None,
                 _state: PhantomData,
             }),
             _ => Err(LlmError::Builder("Unsupported Provider".to_string())),
@@ -94,6 +100,9 @@ impl LlmBuilder<private::ProviderSet> {
             model: None,
             messages: None,
             api_key: Some(key),
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
             _state: PhantomData,
         })
     }
@@ -107,6 +116,9 @@ impl LlmBuilder<private::ApiKeySet> {
             model: Some(model_id.to_string()),
             messages: None,
             api_key: self.api_key,
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
             _state: PhantomData,
         }
     }
@@ -120,7 +132,56 @@ impl LlmBuilder<private::Configuring> {
             model: self.model,
             messages: Some(messages),
             api_key: self.api_key,
+            tools: self.tools,
+            tool_choice: self.tool_choice,
+            parallel_tool_calls: self.parallel_tool_calls,
             _state: PhantomData,
+        }
+    }
+
+    /// Set the tools available for the LLM to use.
+    pub fn tools(self, tools: Box<[Tool]>) -> Self {
+        LlmBuilder {
+            provider: self.provider,
+            model: self.model,
+            messages: self.messages,
+            api_key: self.api_key,
+            tools: Some(tools),
+            tool_choice: self.tool_choice,
+            parallel_tool_calls: self.parallel_tool_calls,
+            _state: self._state,
+        }
+    }
+
+    /// Set the tool choice using a type-safe enum that implements Into<ToolChoice>.
+    /// This accepts the generated toolset::Choice enum for compile-time validation.
+    pub fn tool_choice<TC>(self, choice: TC) -> Self
+    where
+        TC: Into<ToolChoice>,
+    {
+        LlmBuilder {
+            provider: self.provider,
+            model: self.model,
+            messages: self.messages,
+            api_key: self.api_key,
+            tools: self.tools,
+            tool_choice: Some(choice.into()),
+            parallel_tool_calls: self.parallel_tool_calls,
+            _state: self._state,
+        }
+    }
+
+    /// Set whether to allow parallel tool calls.
+    pub fn parallel_tool_calls(self, parallel: bool) -> Self {
+        LlmBuilder {
+            provider: self.provider,
+            model: self.model,
+            messages: self.messages,
+            api_key: self.api_key,
+            tools: self.tools,
+            tool_choice: self.tool_choice,
+            parallel_tool_calls: Some(parallel),
+            _state: self._state,
         }
     }
 }
@@ -199,9 +260,9 @@ impl LlmBuilder<private::MessagesSet> {
                 let req = StructuredRequest {
                     model: model_string,
                     messages,
-                    tools: None,
-                    tool_choice: None,
-                    parallel_tool_calls: None,
+                    tools: todo!(),
+                    tool_choice: todo!(),
+                    parallel_tool_calls: todo!(),
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
                 let res = client.generate_structured::<T>(req).await?;
@@ -224,6 +285,9 @@ pub mod llm {
             messages: None,
             api_key: None,
             _state: PhantomData,
+            tools: todo!(),
+            tool_choice: todo!(),
+            parallel_tool_calls: todo!(),
         }
     }
 }

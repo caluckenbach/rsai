@@ -48,9 +48,10 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
         #[derive(Clone)]
         pub struct #wrapper_name;
         
-        impl ai_rs::core::ToolFunction for #wrapper_name {
-            fn schema(&self) -> ai_rs::core::types::Tool {
-                ai_rs::core::types::Tool {
+        impl ai::core::ToolFunction for #wrapper_name {
+            fn schema(&self) -> ai::core::types::Tool {
+                use ai::core::types::Tool;
+                Tool {
                     name: #fn_name_str.to_string(),
                     description: #description,
                     parameters: #schema,
@@ -58,7 +59,8 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
                 }
             }
             
-            fn execute<'a>(&'a self, params: ::serde_json::Value) -> ai_rs::core::types::BoxFuture<'a, Result<::serde_json::Value, ai_rs::core::error::LlmError>> {
+            fn execute<'a>(&'a self, params: ::serde_json::Value) -> ai::core::types::BoxFuture<'a, Result<::serde_json::Value, ai::core::error::LlmError>> {
+                use ai::core::{types::BoxFuture, error::LlmError};
                 Box::pin(async move {
                     #execute_impl
                 })
@@ -293,12 +295,12 @@ fn generate_execute_impl(fn_name: &syn::Ident, params: &[Parameter], is_async: b
         if param.required {
             quote! {
                 let #name_ident: #ty = params.get(#name)
-                    .ok_or_else(|| ai_rs::core::error::LlmError::ToolExecution {
+                    .ok_or_else(|| LlmError::ToolExecution {
                         message: format!("Missing required parameter: {}", #name),
                         source: None,
                     })
                     .and_then(|v| ::serde_json::from_value(v.clone())
-                        .map_err(|e| ai_rs::core::error::LlmError::ToolExecution {
+                        .map_err(|e| LlmError::ToolExecution {
                             message: format!("Invalid parameter '{}': {:?}", #name, e),
                             source: Some(Box::new(e)),
                         }))?;
@@ -308,7 +310,7 @@ fn generate_execute_impl(fn_name: &syn::Ident, params: &[Parameter], is_async: b
                 let #name_ident: Option<#ty> = params.get(#name)
                     .map(|v| ::serde_json::from_value(v.clone()))
                     .transpose()
-                    .map_err(|e| ai_rs::core::error::LlmError::ToolExecution {
+                    .map_err(|e| LlmError::ToolExecution {
                         message: format!("Invalid parameter '{}': {:?}", #name, e),
                         source: Some(Box::new(e)),
                     })?;
@@ -327,7 +329,7 @@ fn generate_execute_impl(fn_name: &syn::Ident, params: &[Parameter], is_async: b
     Ok(quote! {
         // Parse parameters from JSON
         let params = params.as_object()
-            .ok_or_else(|| ai_rs::core::error::LlmError::ToolExecution {
+            .ok_or_else(|| LlmError::ToolExecution {
                 message: "Parameters must be an object".to_string(),
                 source: None,
             })?;
@@ -339,7 +341,7 @@ fn generate_execute_impl(fn_name: &syn::Ident, params: &[Parameter], is_async: b
         
         // Convert result to JSON
         ::serde_json::to_value(result)
-            .map_err(|e| ai_rs::core::error::LlmError::ToolExecution {
+            .map_err(|e| LlmError::ToolExecution {
                 message: "Failed to serialize result".to_string(),
                 source: Some(Box::new(e)),
             })
