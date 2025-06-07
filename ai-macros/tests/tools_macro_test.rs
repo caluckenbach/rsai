@@ -1,4 +1,4 @@
-use ai_macros::{tool, tools};
+use ai_macros::{tool, toolset};
 
 /// Get the current weather for a city
 /// _city: The city to get weather for
@@ -23,7 +23,7 @@ mod tests {
     #[test]
     fn test_single_tool_macro() {
         // Test that the macro compiles and creates a toolset
-        let toolset = tools![get_weather];
+        let toolset = toolset![get_weather];
 
         // Basic assertions to verify the structure works
         assert_eq!(toolset.tools.len(), 1);
@@ -34,7 +34,7 @@ mod tests {
     #[test]
     fn test_multiple_tools_macro() {
         // Test with multiple tools
-        let toolset = tools![get_weather, calculate_distance];
+        let toolset = toolset![get_weather, calculate_distance];
 
         assert_eq!(toolset.tools.len(), 2);
         assert_eq!(toolset.tools[0].name, "get_weather");
