@@ -71,7 +71,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Usage:
 /// ```rust
-/// use ai_macros::{tool, tools};
+/// use ai_macros::{tool, toolset};
 ///
 /// #[tool]
 /// /// Get current weather for a city
@@ -88,11 +88,11 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///     42.5
 /// }
 ///
-/// let toolset = tools![get_weather, calculate_distance];
+/// let toolset = toolset![get_weather, calculate_distance];
 /// assert_eq!(toolset.tools.len(), 2);
 /// ```
 #[proc_macro]
-pub fn tools(input: TokenStream) -> TokenStream {
+pub fn toolset(input: TokenStream) -> TokenStream {
     match tools::tools_impl(input.into()) {
         Ok(output) => output.into(),
         Err(err) => err.to_compile_error().into(),
