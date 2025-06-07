@@ -21,19 +21,47 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     // Generate JSON schema for parameters
     let schema = generate_parameter_schema(&params)?;
     
-    // Generate a function that returns the Tool struct
-    let tool_fn_name = quote::format_ident!("{}_tool", fn_name);
+    // Generate the wrapper struct name
+    let wrapper_name = quote::format_ident!("{}Tool", 
+        fn_name.to_string()
+            .split('_')
+            .map(|s| {
+                let mut c = s.chars();
+                match c.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                }
+            })
+            .collect::<String>()
+    );
+    
+    // Check if function is async
+    let is_async = input.sig.asyncness.is_some();
+    
+    // Generate the execution code
+    let execute_impl = generate_execute_impl(&fn_name, &params, is_async)?;
     
     // Generate the complete implementation
     let expanded = quote! {
         #input
         
-        pub fn #tool_fn_name() -> ai_rs::core::types::Tool {
-            ai_rs::core::types::Tool {
-                name: #fn_name_str.to_string(),
-                description: #description,
-                parameters: #schema,
-                strict: Some(true),
+        #[derive(Clone)]
+        pub struct #wrapper_name;
+        
+        impl ai_rs::core::ToolFunction for #wrapper_name {
+            fn schema(&self) -> ai_rs::core::types::Tool {
+                ai_rs::core::types::Tool {
+                    name: #fn_name_str.to_string(),
+                    description: #description,
+                    parameters: #schema,
+                    strict: Some(true),
+                }
+            }
+            
+            fn execute<'a>(&'a self, params: ::serde_json::Value) -> ai_rs::core::types::BoxFuture<'a, Result<::serde_json::Value, ai_rs::core::error::LlmError>> {
+                Box::pin(async move {
+                    #execute_impl
+                })
             }
         }
     };
@@ -254,4 +282,66 @@ fn type_to_json_type(ty: &Type) -> Result<&'static str> {
         }
         _ => Ok("object"),
     }
+}
+
+fn generate_execute_impl(fn_name: &syn::Ident, params: &[Parameter], is_async: bool) -> Result<TokenStream> {
+    let param_extractions = params.iter().map(|param| {
+        let name = &param.name;
+        let name_ident = quote::format_ident!("{}", name);
+        let ty = &param.ty;
+        
+        if param.required {
+            quote! {
+                let #name_ident: #ty = params.get(#name)
+                    .ok_or_else(|| ai_rs::core::error::LlmError::ToolExecution {
+                        message: format!("Missing required parameter: {}", #name),
+                        source: None,
+                    })
+                    .and_then(|v| ::serde_json::from_value(v.clone())
+                        .map_err(|e| ai_rs::core::error::LlmError::ToolExecution {
+                            message: format!("Invalid parameter '{}': {:?}", #name, e),
+                            source: Some(Box::new(e)),
+                        }))?;
+            }
+        } else {
+            quote! {
+                let #name_ident: Option<#ty> = params.get(#name)
+                    .map(|v| ::serde_json::from_value(v.clone()))
+                    .transpose()
+                    .map_err(|e| ai_rs::core::error::LlmError::ToolExecution {
+                        message: format!("Invalid parameter '{}': {:?}", #name, e),
+                        source: Some(Box::new(e)),
+                    })?;
+            }
+        }
+    });
+    
+    let param_names: Vec<_> = params.iter().map(|p| quote::format_ident!("{}", p.name)).collect();
+    
+    let function_call = if is_async {
+        quote! { #fn_name(#(#param_names),*).await }
+    } else {
+        quote! { #fn_name(#(#param_names),*) }
+    };
+    
+    Ok(quote! {
+        // Parse parameters from JSON
+        let params = params.as_object()
+            .ok_or_else(|| ai_rs::core::error::LlmError::ToolExecution {
+                message: "Parameters must be an object".to_string(),
+                source: None,
+            })?;
+        
+        #(#param_extractions)*
+        
+        // Call the function
+        let result = #function_call;
+        
+        // Convert result to JSON
+        ::serde_json::to_value(result)
+            .map_err(|e| ai_rs::core::error::LlmError::ToolExecution {
+                message: "Failed to serialize result".to_string(),
+                source: Some(Box::new(e)),
+            })
+    })
 }

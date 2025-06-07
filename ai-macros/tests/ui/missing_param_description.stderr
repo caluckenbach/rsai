@@ -1,5 +1,5 @@
 error: Parameter 'param2' is missing description in docstring. Add: 'param2: description'
-  --> tests/ui/missing_param_description.rs:22:1
+  --> tests/ui/missing_param_description.rs:42:1
    |
-22 | fn function_with_missing_desc(param1: String, param2: i32) -> String {
+42 | fn function_with_missing_desc(param1: String, param2: i32) -> String {
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
