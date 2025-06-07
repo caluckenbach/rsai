@@ -1,6 +1,6 @@
 use crate::core::{
     self,
-    types::{StructuredRequest, StructuredResponse},
+    types::{LlmResponse, StructuredRequest, StructuredResponse, ToolCall},
 };
 use async_trait::async_trait;
 use schemars::schema_for;
@@ -97,6 +97,55 @@ impl LlmProvider for OpenAiClient {
         })?;
 
         create_core_structured_response(api_res)
+    }
+
+    async fn generate<T>(
+        &self,
+        request: StructuredRequest,
+    ) -> Result<LlmResponse<T>, LlmError>
+    where
+        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+    {
+        let request = create_openai_structured_request::<T>(request)?;
+
+        let url = format!("{}/responses", self.base_url);
+        let res = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| LlmError::Network {
+                message: "Failed to complete request".to_string(),
+                source: Box::new(e),
+            })?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let error_text = res
+                .text()
+                .await
+                .map_err(|e| LlmError::Api {
+                    message: "Failed to get the response text".to_string(),
+                    status_code: Some(status.as_u16()),
+                    source: Some(Box::new(e)),
+                })?
+                .clone();
+
+            return Err(LlmError::Api {
+                message: format!("OpenAI API returned error: {}", error_text),
+                status_code: Some(status.as_u16()),
+                source: None,
+            });
+        }
+
+        let api_res: OpenAiStructuredResponse = res.json().await.map_err(|e| LlmError::Parse {
+            message: "Failed to parse OpenAI response".to_string(),
+            source: Box::new(e),
+        })?;
+
+        create_core_llm_response(api_res)
     }
 }
 
@@ -243,8 +292,15 @@ struct InputMessage {
 struct OpenAiStructuredResponse {
     id: String,
     model: String,
-    output: Vec<Message>,
+    output: Vec<OutputContent>,
     usage: Usage,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum OutputContent {
+    OutputMessage(Message),
+    FunctionCall(FunctionCall),
 }
 
 #[derive(Debug, Deserialize)]
@@ -261,6 +317,16 @@ struct Message {
 
     /// This is always `assistant`
     role: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FunctionCall {
+    #[serde(rename = "type")]
+    r#type: String,
+    id: String,
+    call_id: String,
+    name: String,
+    arguments: serde_json::Value,
 }
 
 #[derive(Debug, Deserialize)]
@@ -418,50 +484,91 @@ fn create_core_structured_response<T>(
 where
     T: serde::de::DeserializeOwned,
 {
-    let message = res.output.first().ok_or_else(|| LlmError::Provider {
-        message: "No messages in response".to_string(),
+    let output_content = res.output.first().ok_or_else(|| LlmError::Provider {
+        message: "No output in response".to_string(),
         source: None,
     })?;
 
-    let content = message.content.first().ok_or_else(|| LlmError::Provider {
-        message: "No content in message".to_string(),
-        source: None,
-    })?;
-
-    let text = match content {
-        MessageContent::OutputText(output) => &output.text,
-        MessageContent::Refusal(refusal) => {
-            return Err(LlmError::Api {
-                message: format!("Model refused: {}", refusal.refusal),
-                status_code: None,
+    match output_content {
+        OutputContent::OutputMessage(message) => {
+            let content = message.content.first().ok_or_else(|| LlmError::Provider {
+                message: "No content in message".to_string(),
                 source: None,
-            });
+            })?;
+
+            let text = match content {
+                MessageContent::OutputText(output) => &output.text,
+                MessageContent::Refusal(refusal) => {
+                    return Err(LlmError::Api {
+                        message: format!("Model refused: {}", refusal.refusal),
+                        status_code: None,
+                        source: None,
+                    });
+                }
+            };
+
+            // Try to parse as wrapped value first, then fall back to direct parsing
+            let parsed_content: T = if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
+                wrapped.value
+            } else {
+                serde_json::from_str(&text).map_err(|e| LlmError::Parse {
+                    message: "Failed to parse structured output".to_string(),
+                    source: Box::new(e),
+                })?
+            };
+
+            Ok(StructuredResponse {
+                content: parsed_content,
+                usage: core::types::LanguageModelUsage {
+                    prompt_tokens: res.usage.input_tokens,
+                    completion_tokens: res.usage.output_tokens,
+                    total_tokens: res.usage.total_tokens,
+                },
+                metadata: core::types::ResponseMetadata {
+                    provider: Provider::OpenAI,
+                    model: res.model,
+                    id: res.id,
+                },
+            })
         }
-    };
+        OutputContent::FunctionCall(_) => {
+            Err(LlmError::Provider {
+                message: "Function call response received when expecting structured output".to_string(),
+                source: None,
+            })
+        }
+    }
+}
 
-    // Try to parse as wrapped value first, then fall back to direct parsing
-    let parsed_content: T = if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
-        wrapped.value
-    } else {
-        serde_json::from_str(&text).map_err(|e| LlmError::Parse {
-            message: "Failed to parse structured output".to_string(),
-            source: Box::new(e),
-        })?
-    };
+fn create_core_llm_response<T>(
+    res: OpenAiStructuredResponse,
+) -> Result<LlmResponse<T>, LlmError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    // Check if response contains function calls
+    let function_calls: Vec<&FunctionCall> = res.output.iter()
+        .filter_map(|output| match output {
+            OutputContent::FunctionCall(fc) => Some(fc),
+            OutputContent::OutputMessage(_) => None,
+        })
+        .collect();
 
-    Ok(StructuredResponse {
-        content: parsed_content,
-        usage: core::types::LanguageModelUsage {
-            prompt_tokens: res.usage.input_tokens,
-            completion_tokens: res.usage.output_tokens,
-            total_tokens: res.usage.total_tokens,
-        },
-        metadata: core::types::ResponseMetadata {
-            provider: Provider::OpenAI,
-            model: res.model,
-            id: res.id,
-        },
-    })
+    if !function_calls.is_empty() {
+        let tool_calls = function_calls.into_iter()
+            .map(|fc| ToolCall {
+                id: fc.id.clone(),
+                name: fc.name.clone(),
+                arguments: fc.arguments.clone(),
+            })
+            .collect();
+        
+        return Ok(LlmResponse::ToolCalls(tool_calls));
+    }
+
+    // Otherwise, handle as structured content
+    let structured_response = create_core_structured_response(res)?;
+    Ok(LlmResponse::Content(structured_response))
 }
 
 fn create_function_tool(tool: &core::types::Tool) -> Tool {

@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use super::{
     error::LlmError,
-    types::{BoxFuture, StructuredRequest, StructuredResponse, Tool},
+    types::{BoxFuture, LlmResponse, StructuredRequest, StructuredResponse, Tool},
 };
 
 #[async_trait]
@@ -12,6 +12,13 @@ pub trait LlmProvider {
         &self,
         request: StructuredRequest,
     ) -> Result<StructuredResponse<T>, LlmError>
+    where
+        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema;
+
+    async fn generate<T>(
+        &self,
+        request: StructuredRequest,
+    ) -> Result<LlmResponse<T>, LlmError>
     where
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema;
 }
