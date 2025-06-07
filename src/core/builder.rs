@@ -6,61 +6,22 @@ use crate::provider::openai::{self};
 
 use super::{
     error::LlmError,
-    types::{Message, StructuredRequest, Tool, ToolChoice},
+    traits::LlmProvider,
+    types::{ConversationMessage, Message, StructuredRequest, StructuredResponse, Tool, ToolChoice, ToolRegistry},
 };
 
 mod private {
-    use crate::core::types::{LlmResponse, StructuredRequest, StructuredResponse};
-    use crate::core::error::LlmError;
-    use crate::core::traits::LlmProvider;
-    use crate::provider::openai::OpenAiClient;
-    
     pub struct Init;
     pub struct ProviderSet;
     pub struct ApiKeySet;
     pub struct Configuring;
     pub struct MessagesSet;
     pub struct ToolsSet;
-
-    /// Marker trait for states that can execute complete() requests
-    pub trait CompletableState {
-        type Output<T>;
-        
-        async fn execute_request<T>(
-            client: &OpenAiClient,
-            request: StructuredRequest,
-        ) -> Result<Self::Output<T>, LlmError>
-        where
-            T: serde::de::DeserializeOwned + Send + schemars::JsonSchema;
-    }
     
-    impl CompletableState for MessagesSet {
-        type Output<T> = StructuredResponse<T>;
-        
-        async fn execute_request<T>(
-            client: &OpenAiClient,
-            request: StructuredRequest,
-        ) -> Result<Self::Output<T>, LlmError>
-        where
-            T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
-        {
-            client.generate_structured(request).await
-        }
-    }
-    
-    impl CompletableState for ToolsSet {
-        type Output<T> = LlmResponse<T>;
-        
-        async fn execute_request<T>(
-            client: &OpenAiClient,
-            request: StructuredRequest,
-        ) -> Result<Self::Output<T>, LlmError>
-        where
-            T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
-        {
-            client.generate(request).await
-        }
-    }
+    /// Marker trait for states that can call complete()
+    pub trait Completable {}
+    impl Completable for MessagesSet {}
+    impl Completable for ToolsSet {}
 }
 
 /// A type-safe builder for constructing LLM requests using the builder pattern.
@@ -73,6 +34,7 @@ pub struct LlmBuilder<State> {
     tools: Option<Box<[Tool]>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
+    tool_registry: Option<ToolRegistry>,
     _state: PhantomData<State>,
 }
 
@@ -103,6 +65,7 @@ impl LlmBuilder<private::Init> {
                 tools: None,
                 tool_choice: None,
                 parallel_tool_calls: None,
+                tool_registry: None,
                 _state: PhantomData,
             }),
             _ => Err(LlmError::Builder("Unsupported Provider".to_string())),
@@ -144,6 +107,7 @@ impl LlmBuilder<private::ProviderSet> {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
+            tool_registry: None,
             _state: PhantomData,
         })
     }
@@ -160,6 +124,7 @@ impl LlmBuilder<private::ApiKeySet> {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
+            tool_registry: None,
             _state: PhantomData,
         }
     }
@@ -176,6 +141,7 @@ impl LlmBuilder<private::Configuring> {
             tools: self.tools,
             tool_choice: self.tool_choice,
             parallel_tool_calls: self.parallel_tool_calls,
+            tool_registry: self.tool_registry,
             _state: PhantomData,
         }
     }
@@ -207,10 +173,7 @@ fn validate_builder<State>(
     Ok((messages, provider, model))
 }
 
-impl<State> LlmBuilder<State>
-where
-    State: private::CompletableState,
-{
+impl<State: private::Completable> LlmBuilder<State> {
     /// Execute the LLM request and return structured output of type T.
     /// The type T must implement Deserialize and JsonSchema for structured output generation as well as
     /// be annotated with `#[schemars(deny_unknown_fields)]`.
@@ -237,7 +200,7 @@ where
     ///     .complete::<Analysis>()
     ///     .await?;
     /// ```
-    pub async fn complete<T>(mut self) -> Result<State::Output<T>, LlmError>
+    pub async fn complete<T>(mut self) -> Result<StructuredResponse<T>, LlmError>
     where
         T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
     {
@@ -253,15 +216,20 @@ where
                     self.set_api_key(&api_key);
                 }
 
+                let conversation_messages: Vec<ConversationMessage> = messages
+                    .into_iter()
+                    .map(|msg| ConversationMessage::Chat(msg))
+                    .collect();
+                
                 let req = StructuredRequest {
                     model: model_string,
-                    messages,
+                    messages: conversation_messages,
                     tools: self.tools.clone(),
                     tool_choice: self.tool_choice.clone(),
                     parallel_tool_calls: self.parallel_tool_calls,
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
-                State::execute_request(&client, req).await
+                client.generate_structured(req, self.tool_registry.as_ref()).await
             }
             _ => todo!(),
         }
@@ -269,19 +237,20 @@ where
 }
 
 impl LlmBuilder<private::MessagesSet> {
-    /// Set the tools for the LLM request.
+    /// Set the tools for the LLM request with automatic execution support.
     /// This transitions to the ToolsSet state where tool_choice and parallel_tool_calls can be configured.
     ///
     /// By default parallel tool calling is enabled. This can be changed by calling `parallel_tool_calls` with `false`.
-    pub fn tools(self, tools: impl Into<Box<[Tool]>>) -> LlmBuilder<private::ToolsSet> {
+    pub fn tools(self, toolset: super::types::ToolSet) -> LlmBuilder<private::ToolsSet> {
         LlmBuilder {
             provider: self.provider,
             model: self.model,
             messages: self.messages,
             api_key: self.api_key,
-            tools: Some(tools.into()),
+            tools: Some(toolset.tools),
             tool_choice: self.tool_choice,
             parallel_tool_calls: Some(true),
+            tool_registry: Some(toolset.registry),
             _state: PhantomData,
         }
     }
@@ -304,6 +273,7 @@ impl LlmBuilder<private::ToolsSet> {
         self.parallel_tool_calls = Some(enabled);
         self
     }
+
 }
 
 /// Module containing the main entry point for building LLM requests
@@ -320,6 +290,7 @@ pub mod llm {
             tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
+            tool_registry: None,
             _state: PhantomData,
         }
     }
