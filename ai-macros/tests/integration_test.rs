@@ -1,4 +1,4 @@
-// Mock the ai_rs types for testing
+// Mock the ai_rs types for testing the macro in isolation
 mod ai_rs {
     pub mod core {
         pub mod types {
@@ -108,3 +108,4 @@ fn test_complex_function_docstring_parsing() {
     assert!(required.contains(&serde_json::Value::String("param3".to_string())));
     assert!(!required.contains(&serde_json::Value::String("param2".to_string())));
 }
+

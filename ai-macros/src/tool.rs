@@ -15,6 +15,9 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     // Parse function parameters
     let params = parse_parameters(&input.sig.inputs, &param_descriptions)?;
     
+    // Validate that all docstring parameters exist as actual parameters
+    validate_parameter_descriptions(&params, &param_descriptions, &input.sig)?;
+    
     // Generate JSON schema for parameters
     let schema = generate_parameter_schema(&params)?;
     
@@ -147,6 +150,36 @@ fn parse_parameters(
     Ok(params)
 }
 
+fn validate_parameter_descriptions(
+    params: &[Parameter],
+    param_descriptions: &std::collections::HashMap<String, String>,
+    sig: &syn::Signature,
+) -> Result<()> {
+    let actual_param_names: std::collections::HashSet<String> = 
+        params.iter().map(|p| p.name.clone()).collect();
+    
+    // Check for docstring parameters that don't exist in the function
+    for docstring_param in param_descriptions.keys() {
+        if !actual_param_names.contains(docstring_param) {
+            return Err(syn::Error::new_spanned(
+                sig,
+                format!("Parameter '{}' found in docstring but not in function parameters", docstring_param)
+            ));
+        }
+    }
+    
+    // Check for missing parameter descriptions in docstring
+    for param in params {
+        if !param_descriptions.contains_key(&param.name) {
+            return Err(syn::Error::new_spanned(
+                sig,
+                format!("Parameter '{}' is missing description in docstring. Add: '{}: description'", param.name, param.name)
+            ));
+        }
+    }
+    
+    Ok(())
+}
 
 fn generate_parameter_schema(params: &[Parameter]) -> Result<TokenStream> {
     if params.is_empty() {
