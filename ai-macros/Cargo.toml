@@ -16,3 +16,4 @@ serde_json = "1.0"
 [dev-dependencies]
 trybuild = "1.0"
 ai = { path = ".." }
+tokio = { version = "1.0", features = ["macros", "rt"] }

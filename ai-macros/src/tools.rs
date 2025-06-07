@@ -36,8 +36,8 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
     }
     
     // Use the same naming logic as the #[tool] macro to reference existing wrapper structs
-    let tool_instances: Vec<_> = tools_list.tools.iter().map(|tool_name| {
-        let wrapper_name = quote::format_ident!("{}Tool", 
+    let wrapper_names: Vec<_> = tools_list.tools.iter().map(|tool_name| {
+        quote::format_ident!("{}Tool", 
             tool_name.to_string()
                 .split('_')
                 .map(|s| {
@@ -48,7 +48,10 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
                     }
                 })
                 .collect::<String>()
-        );
+        )
+    }).collect();
+    
+    let tool_schemas: Vec<_> = wrapper_names.iter().map(|wrapper_name| {
         quote! { #wrapper_name.schema() }
     }).collect();
     
@@ -118,16 +121,19 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
             }
             
             let tools: Vec<Tool> = vec![
-                #(#tool_instances,)*
+                #(#tool_schemas,)*
             ];
             
-            // Return a struct that contains the tools
-            pub struct ToolSet {
-                pub tools: Box<[Tool]>,
-            }
+            // Use the ToolSet type from core::types
             
-            ToolSet {
+            let mut registry = ai::core::types::ToolRegistry::new();
+            #(
+                registry.register(std::sync::Arc::new(#wrapper_names));
+            )*
+            
+            ai::core::types::ToolSet {
                 tools: tools.into_boxed_slice(),
+                registry,
             }
         }
     };
