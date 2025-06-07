@@ -1,6 +1,8 @@
 use proc_macro::TokenStream;
 use quote::quote;
 
+mod tool;
+
 /// Attribute macro for types used with the `complete::<T>()` method.
 ///
 /// This macro automatically adds the necessary derives and attributes:
@@ -30,4 +32,29 @@ pub fn completion_schema(_attr: TokenStream, item: TokenStream) -> TokenStream {
     };
 
     TokenStream::from(expanded)
+}
+
+/// Attribute macro for marking functions as tools that can be called by LLMs.
+///
+/// This macro generates the necessary boilerplate to make a function callable
+/// as a tool, including JSON schema generation and parameter parsing.
+///
+/// Usage:
+/// ```rust
+/// #[tool]
+/// async fn get_weather(
+///     /// The city to get weather for
+///     city: String,
+///     /// Temperature unit (celsius or fahrenheit)
+///     unit: Option<String>,
+/// ) -> Result<WeatherData, ToolError> {
+///     // Implementation
+/// }
+/// ```
+#[proc_macro_attribute]
+pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
+    match tool::tool_impl(attr.into(), item.into()) {
+        Ok(output) => output.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
 }
