@@ -2,6 +2,7 @@ use proc_macro::TokenStream;
 use quote::quote;
 
 mod tool;
+mod tools;
 
 /// Attribute macro for types used with the `complete::<T>()` method.
 ///
@@ -54,6 +55,29 @@ pub fn completion_schema(_attr: TokenStream, item: TokenStream) -> TokenStream {
 #[proc_macro_attribute]
 pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
     match tool::tool_impl(attr.into(), item.into()) {
+        Ok(output) => output.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+/// Macro for creating a collection of tools from annotated functions.
+///
+/// This macro takes a comma-separated list of function names that have been
+/// annotated with `#[tool]` and creates a `Box<[Tool]>` containing their schemas.
+///
+/// Usage:
+/// ```rust
+/// #[tool]
+/// fn get_weather(city: String) -> Result<String, LlmError> { /* ... */ }
+///
+/// #[tool]
+/// fn calculate_distance(from: String, to: String) -> Result<f64, LlmError> { /* ... */ }
+///
+/// let tools = tools![get_weather, calculate_distance];
+/// ```
+#[proc_macro]
+pub fn tools(input: TokenStream) -> TokenStream {
+    match tools::tools_impl(input.into()) {
         Ok(output) => output.into(),
         Err(err) => err.to_compile_error().into(),
     }

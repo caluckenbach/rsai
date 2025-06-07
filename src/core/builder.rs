@@ -199,6 +199,9 @@ impl LlmBuilder<private::MessagesSet> {
                 let req = StructuredRequest {
                     model: model_string,
                     messages,
+                    tools: None,
+                    tool_choice: None,
+                    parallel_tool_calls: None,
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
                 let res = client.generate_structured::<T>(req).await?;
