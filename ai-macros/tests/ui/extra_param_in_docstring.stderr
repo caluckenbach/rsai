@@ -1,5 +1,13 @@
 error: Parameter 'nonexistent' found in docstring but not in function parameters
-  --> tests/ui/extra_param_in_docstring.rs:42:1
-   |
-42 | fn function_with_extra_param(param1: String) -> String {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ --> tests/ui/extra_param_in_docstring.rs:9:1
+  |
+9 | fn function_with_extra_param(param1: String) -> String {
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused imports: `ToolFunction`, `error::LlmError`, and `types::Tool`
+ --> tests/ui/extra_param_in_docstring.rs:2:16
+  |
+2 | use ai::core::{ToolFunction, types::Tool, error::LlmError};
+  |                ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default

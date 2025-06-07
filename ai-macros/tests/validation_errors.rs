@@ -1,38 +1,3 @@
-// Mock the ai_rs types for testing the macro in isolation
-mod ai_rs {
-    pub mod core {
-        pub mod types {
-            use std::future::Future;
-            use std::pin::Pin;
-            
-            #[derive(Debug, Clone, PartialEq)]
-            pub struct Tool {
-                pub name: String,
-                pub description: Option<String>,
-                pub parameters: serde_json::Value,
-                pub strict: Option<bool>,
-            }
-            
-            pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
-        }
-        
-        pub mod error {
-            #[derive(Debug)]
-            pub enum LlmError {
-                ToolExecution {
-                    message: String,
-                    source: Option<Box<dyn std::error::Error + Send + Sync>>,
-                },
-            }
-        }
-        
-        pub trait ToolFunction: Send + Sync {
-            fn schema(&self) -> types::Tool;
-            fn execute<'a>(&'a self, params: serde_json::Value) -> types::BoxFuture<'a, Result<serde_json::Value, error::LlmError>>;
-        }
-    }
-}
-
 use ai_macros::tool;
 
 // This test verifies that the macro produces a compile error when a parameter
@@ -46,8 +11,8 @@ fn test_should_compile() {
     fn valid_function(param1: String) -> String {
         param1
     }
-    
-    use ai_rs::core::ToolFunction;
+
+    use ai::core::ToolFunction;
     let tool_instance = ValidFunctionTool;
     let tool = tool_instance.schema();
     assert_eq!(tool.name, "valid_function");
@@ -73,7 +38,7 @@ fn function_with_extra_docstring_param(param1: String) -> String {
 // This would fail with: "Parameter 'param2' is missing description in docstring. Add: 'param2: description'"
 /*
 #[tool]
-/// Function with missing parameter description  
+/// Function with missing parameter description
 /// param1: First parameter description
 /// (param2 description is missing)
 fn function_with_missing_param_desc(param1: String, param2: i32) -> String {
