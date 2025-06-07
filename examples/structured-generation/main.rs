@@ -1,4 +1,4 @@
-use ai::{completion_schema, llm, Message, ChatRole, ApiKey};
+use ai::{ApiKey, ChatRole, Message, completion_schema, llm};
 use dotenv::dotenv;
 
 #[completion_schema]
@@ -22,7 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .complete::<Analysis>()
         .await?;
 
-    println!("Sentiment: {}, Confidence: {}", analysis.sentiment, analysis.confidence);
+    println!(
+        "Sentiment: {}, Confidence: {}",
+        analysis.content.sentiment, analysis.content.confidence
+    );
 
     Ok(())
 }
