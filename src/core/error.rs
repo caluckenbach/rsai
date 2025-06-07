@@ -43,4 +43,7 @@ pub enum LlmError {
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
+
+    #[error("Tool not found: {0}")]
+    ToolNotFound(String),
 }
