@@ -135,7 +135,7 @@ struct JsonSchema {
     schema: serde_json::Value,
 
     #[serde(rename = "type")]
-    j_type: JsonSchemaType,
+    r#type: JsonSchemaType,
 }
 
 #[derive(Debug, Serialize)]
@@ -172,7 +172,7 @@ struct Message {
 
     /// This is always `message`
     #[serde(rename = "type")]
-    m_type: String,
+    r#type: String,
 
     status: MessageStatus,
 
@@ -193,7 +193,7 @@ enum MessageContent {
 struct OutputText {
     /// Always `output_text`
     #[serde(rename = "type")]
-    c_type: String,
+    r#type: String,
 
     text: String,
     // TODO
@@ -207,7 +207,7 @@ struct Refusal {
 
     /// Always `refusal`
     #[serde(rename = "type")]
-    r_type: String,
+    r#type: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -300,7 +300,7 @@ where
     let schema = JsonSchema {
         name: schema_name,
         schema: schema_value,
-        j_type: JsonSchemaType::JsonSchema,
+        r#type: JsonSchemaType::JsonSchema,
     };
 
     Ok(OpenAiStructuredRequest {
