@@ -1,0 +1,5 @@
+error: Parameter 'nonexistent' found in docstring but not in function parameters
+  --> tests/ui/extra_param_in_docstring.rs:22:1
+   |
+22 | fn function_with_extra_param(param1: String) -> String {
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
