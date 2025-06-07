@@ -51,9 +51,6 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
         )
     }).collect();
     
-    let tool_schemas: Vec<_> = wrapper_names.iter().map(|wrapper_name| {
-        quote! { #wrapper_name.schema() }
-    }).collect();
     
     // Generate enum variants for type-safe tool choice
     let enum_variants: Vec<_> = tools_list.tools.iter().map(|tool_name| {
@@ -120,10 +117,6 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
                 }
             }
             
-            let tools: Vec<Tool> = vec![
-                #(#tool_schemas,)*
-            ];
-            
             // Use the ToolSet type from core::types
             
             let mut registry = ai::core::types::ToolRegistry::new();
@@ -132,7 +125,6 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
             )*
             
             ai::core::types::ToolSet {
-                tools: tools.into_boxed_slice(),
                 registry,
             }
         }

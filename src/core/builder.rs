@@ -247,7 +247,7 @@ impl LlmBuilder<private::MessagesSet> {
             model: self.model,
             messages: self.messages,
             api_key: self.api_key,
-            tools: Some(toolset.tools),
+            tools: Some(toolset.tools().into_boxed_slice()),
             tool_choice: self.tool_choice,
             parallel_tool_calls: Some(true),
             tool_registry: Some(toolset.registry),

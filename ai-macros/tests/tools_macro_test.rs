@@ -28,9 +28,10 @@ mod tests {
         let toolset = toolset![get_weather];
 
         // Basic assertions to verify the structure works
-        assert_eq!(toolset.tools.len(), 1);
-        assert_eq!(toolset.tools[0].name, "get_weather");
-        assert!(toolset.tools[0].description.is_some());
+        let tools = toolset.tools();
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "get_weather");
+        assert!(tools[0].description.is_some());
     }
 
     #[test]
@@ -38,9 +39,12 @@ mod tests {
         // Test with multiple tools
         let toolset = toolset![get_weather, calculate_distance];
 
-        assert_eq!(toolset.tools.len(), 2);
-        assert_eq!(toolset.tools[0].name, "get_weather");
-        assert_eq!(toolset.tools[1].name, "calculate_distance");
+        let tools = toolset.tools();
+        assert_eq!(tools.len(), 2);
+        
+        let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+        assert!(tool_names.contains(&"get_weather".to_string()));
+        assert!(tool_names.contains(&"calculate_distance".to_string()));
     }
 
     #[test]
@@ -147,7 +151,8 @@ mod tests {
         // We can't directly test the enum without exposing it, but we can verify
         // the toolset structure that depends on it works correctly
         
-        assert_eq!(toolset.tools.len(), 2);
+        let tools = toolset.tools();
+        assert_eq!(tools.len(), 2);
         assert_eq!(toolset.registry.get_schemas().len(), 2);
     }
 
