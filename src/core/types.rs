@@ -119,6 +119,11 @@ impl ToolRegistry {
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub struct ToolSet {
-    pub tools: Box<[Tool]>,
     pub registry: ToolRegistry,
+}
+
+impl ToolSet {
+    pub fn tools(&self) -> Vec<Tool> {
+        self.registry.get_schemas()
+    }
 }

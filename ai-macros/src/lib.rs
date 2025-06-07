@@ -89,7 +89,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 ///
 /// let toolset = toolset![get_weather, calculate_distance];
-/// assert_eq!(toolset.tools.len(), 2);
+/// assert_eq!(toolset.tools().len(), 2);
 /// ```
 #[proc_macro]
 pub fn toolset(input: TokenStream) -> TokenStream {
