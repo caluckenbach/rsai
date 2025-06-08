@@ -1,5 +1,5 @@
-use ai::{ApiKey, ChatRole, Message, completion_schema, llm};
-use ai_macros::{tool, toolset};
+use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
+use rsai_macros::{tool, toolset};
 use dotenv::dotenv;
 
 #[tool]

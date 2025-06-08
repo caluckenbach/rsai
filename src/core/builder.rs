@@ -180,9 +180,10 @@ impl<State: private::Completable> LlmBuilder<State> {
     /// Use the `completion_schema` attribute macro to easily define structured output types.
     ///
     /// # Example
-    /// ```
-    /// use ai::{completion_schema, llm, Message, ChatRole, ApiKey};
-    ///
+    /// ```no_run
+    /// # use rsai::{completion_schema, llm, Message, ChatRole, ApiKey};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// #[completion_schema]
     /// struct Analysis {
     ///     sentiment: String,
@@ -199,6 +200,8 @@ impl<State: private::Completable> LlmBuilder<State> {
     ///     }])
     ///     .complete::<Analysis>()
     ///     .await?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub async fn complete<T>(mut self) -> Result<StructuredResponse<T>, LlmError>
     where

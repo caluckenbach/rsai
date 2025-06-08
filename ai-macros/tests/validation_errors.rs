@@ -1,4 +1,4 @@
-use ai_macros::tool;
+use rsai_macros::tool;
 
 // This test verifies that the macro produces a compile error when a parameter
 // is documented in the docstring but doesn't exist in the function signature
@@ -12,7 +12,7 @@ fn test_should_compile() {
         param1
     }
 
-    use ai::core::ToolFunction;
+    use rsai::core::ToolFunction;
     let tool_instance = ValidFunctionTool;
     let tool = tool_instance.schema();
     assert_eq!(tool.name, "valid_function");

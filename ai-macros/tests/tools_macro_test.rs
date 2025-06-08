@@ -1,4 +1,4 @@
-use ai_macros::{tool, toolset};
+use rsai_macros::{tool, toolset};
 
 /// Get the current weather for a city
 /// _city: The city to get weather for
@@ -19,7 +19,7 @@ fn calculate_distance(_from: String, _to: String) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ai::core::types::{ToolCall, ToolChoice};
+    use rsai::core::types::{ToolCall, ToolChoice};
     use serde_json::json;
 
     #[test]

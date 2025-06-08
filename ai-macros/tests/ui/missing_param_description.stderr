@@ -5,9 +5,9 @@ error: Parameter 'param2' is missing description in docstring. Add: 'param2: des
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: unused imports: `ToolFunction`, `error::LlmError`, and `types::Tool`
- --> tests/ui/missing_param_description.rs:2:16
+ --> tests/ui/missing_param_description.rs:2:18
   |
-2 | use ai::core::{ToolFunction, types::Tool, error::LlmError};
-  |                ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+2 | use rsai::core::{ToolFunction, types::Tool, error::LlmError};
+  |                  ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
   |
   = note: `#[warn(unused_imports)]` on by default

@@ -1,4 +1,4 @@
-use ai_macros::tool;
+use rsai_macros::tool;
 
 #[tool]
 /// Get current temperature for a given location.
@@ -9,7 +9,7 @@ fn get_weather(_location: String) -> f64 {
 
 #[test]
 fn test_get_weather_tool_schema() {
-    use ai::core::ToolFunction;
+    use rsai::core::ToolFunction;
     let tool_instance = GetWeatherTool;
     let tool = tool_instance.schema();
 
@@ -56,7 +56,7 @@ fn complex_function(param1: String, param2: Option<i32>, param3: bool) -> String
 
 #[test]
 fn test_complex_function_docstring_parsing() {
-    use ai::core::ToolFunction;
+    use rsai::core::ToolFunction;
     let tool_instance = ComplexFunctionTool;
     let tool = tool_instance.schema();
 
