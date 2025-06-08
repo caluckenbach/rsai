@@ -45,18 +45,6 @@ fn calculate_distance(from: String, to: String) -> f64 {
     }
 }
 
-#[tool]
-/// Get current time in a city
-/// city: The city to get time for
-fn get_time(city: String) -> String {
-    match city.to_lowercase().as_str() {
-        "london" => format!("Current time in {}: 14:30 GMT", city),
-        "tokyo" => format!("Current time in {}: 23:30 JST", city),
-        "new york" => format!("Current time in {}: 09:30 EST", city),
-        _ => format!("Current time in {}: 12:00 UTC", city),
-    }
-}
-
 #[completion_schema]
 struct Weather {
     city: String,
@@ -68,12 +56,18 @@ struct Weather {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
-    let tools = toolset![get_weather, calculate_distance, get_time];
+    let tools = toolset![get_weather, calculate_distance];
 
-    let messages = vec![Message {
-        role: ChatRole::User,
-        content: "What's the weather like in Tokyo and how far is it from London?".to_string(),
-    }];
+    let messages = vec![
+        Message {
+            role: ChatRole::System,
+            content: "You are a helpful assistant. Use the available tools to gather information, then provide a structured Weather response for the requested city.".to_string(),
+        },
+        Message {
+            role: ChatRole::User,
+            content: "What's the weather like in Tokyo?".to_string(),
+        }
+    ];
 
     let response = llm::call()
         .provider("openai")?
