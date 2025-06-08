@@ -1,6 +1,6 @@
 use crate::core::{
     self,
-    types::{LlmResponse, StructuredRequest, StructuredResponse, ToolCall},
+    types::{ConversationMessage, StructuredRequest, StructuredResponse, ToolCall, ToolRegistry},
 };
 use async_trait::async_trait;
 use schemars::schema_for;
@@ -44,6 +44,179 @@ impl OpenAiClient {
         self.default_model = model;
         self
     }
+
+    async fn make_api_request(
+        &self,
+        request: OpenAiStructuredRequest,
+    ) -> Result<OpenAiStructuredResponse, LlmError> {
+        let url = format!("{}/responses", self.base_url);
+
+        let res = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| LlmError::Network {
+                message: "Failed to complete request".to_string(),
+                source: Box::new(e),
+            })?;
+
+        if !res.status().is_success() {
+            let status = res.status();
+            let error_text = res
+                .text()
+                .await
+                .map_err(|e| LlmError::Api {
+                    message: "Failed to get the response text".to_string(),
+                    status_code: Some(status.as_u16()),
+                    source: Some(Box::new(e)),
+                })?
+                .clone();
+
+            return Err(LlmError::Api {
+                message: format!("OpenAI API returned error: {}", error_text),
+                status_code: Some(status.as_u16()),
+                source: None,
+            });
+        }
+
+        res.json().await.map_err(|e| LlmError::Parse {
+            message: "Failed to parse OpenAI response".to_string(),
+            source: Box::new(e),
+        })
+    }
+
+    async fn handle_tool_calling_loop<T>(
+        &self,
+        request: StructuredRequest,
+        tool_registry: &ToolRegistry,
+    ) -> Result<StructuredResponse<T>, LlmError>
+    where
+        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+    {
+        // Convert initial request to OpenAI format once
+        let mut openai_input = convert_messages_to_openai_format(request.messages)?;
+
+        loop {
+            let openai_request = OpenAiStructuredRequest {
+                model: request.model.clone(),
+                input: openai_input.clone(),
+                text: create_format_for_type::<T>()?,
+                tools: request.tools.as_ref().map(|tools| {
+                    tools
+                        .iter()
+                        .map(create_function_tool)
+                        .collect::<Box<[Tool]>>()
+                }),
+                tool_choice: request
+                    .tool_choice
+                    .as_ref()
+                    .map(|tc| create_function_tool_choice(tc.clone())),
+                parallel_tool_calls: request.parallel_tool_calls,
+            };
+
+            let api_response = self.make_api_request(openai_request).await?;
+
+            // Check if response contains function calls
+            let function_calls: Vec<&FunctionToolCall> = api_response
+                .output
+                .iter()
+                .filter_map(|output| match output {
+                    OutputContent::FunctionCall(fc) => Some(fc),
+                    OutputContent::OutputMessage(_) => None,
+                })
+                .collect();
+
+            if function_calls.is_empty() {
+                // No more tool calls, return the structured response
+                return create_core_structured_response(api_response);
+            }
+
+            // Handle tool calls based on whether parallel execution is enabled
+            let is_parallel = request.parallel_tool_calls.unwrap_or(true);
+
+            if is_parallel && function_calls.len() > 1 {
+                // For parallel tool calls: add all tool calls first, then all results
+                let mut pending_executions = Vec::new();
+
+                // Add all function calls to the input
+                for function_call in &function_calls {
+                    openai_input.push(InputItem::FunctionCall((*function_call).clone()));
+
+                    // Parse arguments for execution
+                    let arguments = match &function_call.arguments {
+                        serde_json::Value::String(s) => {
+                            serde_json::from_str(s).map_err(|e| LlmError::Parse {
+                                message: format!("Failed to parse tool arguments: {}", s),
+                                source: Box::new(e),
+                            })?
+                        }
+                        other => other.clone(),
+                    };
+
+                    pending_executions.push((
+                        function_call.id.clone(),
+                        function_call.call_id.clone(),
+                        function_call.name.clone(),
+                        arguments,
+                    ));
+                }
+
+                // Execute all tools and add their results
+                for (id, call_id, name, arguments) in pending_executions {
+                    let tool_call = ToolCall {
+                        id: id.clone(),
+                        call_id: call_id.clone(),
+                        name,
+                        arguments,
+                    };
+
+                    let result = tool_registry.execute(&tool_call).await?;
+
+                    openai_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
+                        call_id,
+                        output: serde_json::Value::String(result),
+                        r#type: "function_call_output".to_string(),
+                    }));
+                }
+            } else {
+                // For sequential tool calls: add tool call and result pairs one by one
+                for function_call in function_calls {
+                    // Add the function call
+                    openai_input.push(InputItem::FunctionCall((*function_call).clone()));
+
+                    // Parse arguments for execution
+                    let arguments = match &function_call.arguments {
+                        serde_json::Value::String(s) => {
+                            serde_json::from_str(s).map_err(|e| LlmError::Parse {
+                                message: format!("Failed to parse tool arguments: {}", s),
+                                source: Box::new(e),
+                            })?
+                        }
+                        other => other.clone(),
+                    };
+
+                    let tool_call = ToolCall {
+                        id: function_call.id.clone(),
+                        call_id: function_call.call_id.clone(),
+                        name: function_call.name.clone(),
+                        arguments,
+                    };
+
+                    // Execute tool and add result immediately
+                    let result = tool_registry.execute(&tool_call).await?;
+
+                    openai_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
+                        call_id: function_call.call_id.clone(),
+                        output: serde_json::Value::String(result),
+                        r#type: "function_call_output".to_string(),
+                    }));
+                }
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -51,108 +224,29 @@ impl LlmProvider for OpenAiClient {
     async fn generate_structured<T>(
         &self,
         request: StructuredRequest,
+        tool_registry: Option<&ToolRegistry>,
     ) -> Result<StructuredResponse<T>, LlmError>
     where
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
-        // TODO: Fix error handling.
-
-        let request = create_openai_structured_request::<T>(request)?;
-
-        let url = format!("{}/responses", self.base_url);
-        let res = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| LlmError::Network {
-                message: "Failed to complete request".to_string(),
-                source: Box::new(e),
-            })?;
-
-        if !res.status().is_success() {
-            let status = res.status();
-            let error_text = res
-                .text()
-                .await
-                .map_err(|e| LlmError::Api {
-                    message: "Failed to get the response text".to_string(),
-                    status_code: Some(status.as_u16()),
-                    source: Some(Box::new(e)),
-                })?
-                .clone();
-
-            return Err(LlmError::Api {
-                message: format!("OpenAI API returned error: {}", error_text),
-                status_code: Some(status.as_u16()),
-                source: None,
-            });
+        // If tools are present and we have a registry, handle automatic tool calling
+        if request.tools.is_some() && tool_registry.is_some() {
+            return self
+                .handle_tool_calling_loop(request, tool_registry.unwrap())
+                .await;
         }
 
-        let api_res: OpenAiStructuredResponse = res.json().await.map_err(|e| LlmError::Parse {
-            message: "Failed to parse OpenAI response".to_string(),
-            source: Box::new(e),
-        })?;
-
-        create_core_structured_response(api_res)
-    }
-
-    async fn generate<T>(
-        &self,
-        request: StructuredRequest,
-    ) -> Result<LlmResponse<T>, LlmError>
-    where
-        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
-    {
-        let request = create_openai_structured_request::<T>(request)?;
-
-        let url = format!("{}/responses", self.base_url);
-        let res = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(&request)
-            .send()
-            .await
-            .map_err(|e| LlmError::Network {
-                message: "Failed to complete request".to_string(),
-                source: Box::new(e),
-            })?;
-
-        if !res.status().is_success() {
-            let status = res.status();
-            let error_text = res
-                .text()
-                .await
-                .map_err(|e| LlmError::Api {
-                    message: "Failed to get the response text".to_string(),
-                    status_code: Some(status.as_u16()),
-                    source: Some(Box::new(e)),
-                })?
-                .clone();
-
-            return Err(LlmError::Api {
-                message: format!("OpenAI API returned error: {}", error_text),
-                status_code: Some(status.as_u16()),
-                source: None,
-            });
-        }
-
-        let api_res: OpenAiStructuredResponse = res.json().await.map_err(|e| LlmError::Parse {
-            message: "Failed to parse OpenAI response".to_string(),
-            source: Box::new(e),
-        })?;
-
-        create_core_llm_response(api_res)
+        // Otherwise, make a single request expecting structured content
+        let openai_request = create_openai_structured_request::<T>(request)?;
+        let api_response = self.make_api_request(openai_request).await?;
+        create_core_structured_response(api_response)
     }
 }
 
 #[derive(Debug, Serialize)]
 struct OpenAiStructuredRequest {
     model: String,
-    input: Vec<InputMessage>,
+    input: Vec<InputItem>,
     text: Format,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -232,7 +326,7 @@ struct FunctionTool {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(untagged)]
+#[serde(rename_all = "snake_case")]
 enum FunctionType {
     Function,
 }
@@ -274,7 +368,7 @@ enum JsonSchemaType {
     JsonSchema,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 enum InputMessageRole {
     System,
@@ -282,7 +376,15 @@ enum InputMessageRole {
     Assistant,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Clone)]
+#[serde(untagged)]
+enum InputItem {
+    Message(InputMessage),
+    FunctionCall(FunctionToolCall),
+    FunctionCallOutput(FunctionToolCallOutput),
+}
+
+#[derive(Debug, Serialize, Clone)]
 struct InputMessage {
     role: InputMessageRole,
     content: String,
@@ -300,7 +402,7 @@ struct OpenAiStructuredResponse {
 #[serde(untagged)]
 enum OutputContent {
     OutputMessage(Message),
-    FunctionCall(FunctionCall),
+    FunctionCall(FunctionToolCall),
 }
 
 #[derive(Debug, Deserialize)]
@@ -311,7 +413,7 @@ struct Message {
     #[serde(rename = "type")]
     r#type: String,
 
-    status: MessageStatus,
+    status: Status,
 
     content: Vec<MessageContent>,
 
@@ -319,14 +421,28 @@ struct Message {
     role: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct FunctionCall {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct FunctionToolCall {
     #[serde(rename = "type")]
     r#type: String,
     id: String,
     call_id: String,
     name: String,
     arguments: serde_json::Value,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct FunctionToolCallOutput {
+    call_id: String,
+    output: serde_json::Value,
+    #[serde(rename = "type")]
+    r#type: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum FunctionToolCallOutputType {
+    FunctionCallOutput,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,9 +473,9 @@ struct Refusal {
     r#type: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
-enum MessageStatus {
+enum Status {
     InProgress,
     Completed,
     Incomplete,
@@ -396,59 +512,8 @@ fn create_openai_structured_request<T>(
 where
     T: schemars::JsonSchema,
 {
-    let input = req
-        .messages
-        .into_iter()
-        .map(|m| InputMessage {
-            role: match m.role {
-                core::types::ChatRole::System => InputMessageRole::System,
-                core::types::ChatRole::User => InputMessageRole::User,
-                core::types::ChatRole::Assistant => InputMessageRole::Assistant,
-            },
-            content: m.content,
-        })
-        .collect();
-
-    let s = schema_for!(T);
-
-    let schema_name = s
-        .schema
-        .metadata
-        .as_ref()
-        .and_then(|meta| meta.title.as_ref())
-        .ok_or_else(|| LlmError::Provider {
-            message: "Failed to build JSON Schema: Missing schema name".to_string(),
-            source: None,
-        })?
-        .clone();
-
-    let mut schema_value = serde_json::to_value(&s).map_err(|e| LlmError::Parse {
-        message: "Failed to build JSON Schema".to_string(),
-        source: Box::new(e),
-    })?;
-
-    let needs_wrapping = schema_value
-        .get("type")
-        .and_then(|t| t.as_str())
-        .map(|t| t != "object")
-        .unwrap_or(false);
-
-    if needs_wrapping {
-        schema_value = serde_json::json!({
-            "type": "object",
-            "properties": {
-                "value": schema_value
-            },
-            "required": ["value"],
-            "additionalProperties": false
-        })
-    }
-
-    let schema = JsonSchema {
-        name: schema_name,
-        schema: schema_value,
-        r#type: JsonSchemaType::JsonSchema,
-    };
+    let input = convert_messages_to_openai_format(req.messages)?;
+    let text = create_format_for_type::<T>()?;
 
     let tools = if let Some(req_tools) = req.tools {
         let tools = req_tools
@@ -469,9 +534,7 @@ where
     Ok(OpenAiStructuredRequest {
         model: req.model,
         input,
-        text: Format {
-            format: FormatType::JsonSchema(schema),
-        },
+        text,
         tools,
         tool_choice,
         parallel_tool_calls: req.parallel_tool_calls,
@@ -508,14 +571,15 @@ where
             };
 
             // Try to parse as wrapped value first, then fall back to direct parsing
-            let parsed_content: T = if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
-                wrapped.value
-            } else {
-                serde_json::from_str(&text).map_err(|e| LlmError::Parse {
-                    message: "Failed to parse structured output".to_string(),
-                    source: Box::new(e),
-                })?
-            };
+            let parsed_content: T =
+                if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
+                    wrapped.value
+                } else {
+                    serde_json::from_str(&text).map_err(|e| LlmError::Parse {
+                        message: "Failed to parse structured output".to_string(),
+                        source: Box::new(e),
+                    })?
+                };
 
             Ok(StructuredResponse {
                 content: parsed_content,
@@ -531,51 +595,38 @@ where
                 },
             })
         }
-        OutputContent::FunctionCall(_) => {
-            Err(LlmError::Provider {
-                message: "Function call response received when expecting structured output".to_string(),
-                source: None,
-            })
-        }
+        OutputContent::FunctionCall(_) => Err(LlmError::Provider {
+            message: "Function call response received when expecting structured output".to_string(),
+            source: None,
+        }),
     }
-}
-
-fn create_core_llm_response<T>(
-    res: OpenAiStructuredResponse,
-) -> Result<LlmResponse<T>, LlmError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    // Check if response contains function calls
-    let function_calls: Vec<&FunctionCall> = res.output.iter()
-        .filter_map(|output| match output {
-            OutputContent::FunctionCall(fc) => Some(fc),
-            OutputContent::OutputMessage(_) => None,
-        })
-        .collect();
-
-    if !function_calls.is_empty() {
-        let tool_calls = function_calls.into_iter()
-            .map(|fc| ToolCall {
-                id: fc.id.clone(),
-                name: fc.name.clone(),
-                arguments: fc.arguments.clone(),
-            })
-            .collect();
-        
-        return Ok(LlmResponse::ToolCalls(tool_calls));
-    }
-
-    // Otherwise, handle as structured content
-    let structured_response = create_core_structured_response(res)?;
-    Ok(LlmResponse::Content(structured_response))
 }
 
 fn create_function_tool(tool: &core::types::Tool) -> Tool {
+    let strict = tool.strict.unwrap_or(true);
+    let mut parameters = tool.parameters.clone();
+
+    // OpenAI strict mode requires ALL properties to be in the required array
+    if strict {
+        if let Some(properties) = parameters.get("properties").and_then(|p| p.as_object()) {
+            let all_property_names: Vec<serde_json::Value> = properties
+                .keys()
+                .map(|k| serde_json::Value::String(k.clone()))
+                .collect();
+
+            if let Some(params_obj) = parameters.as_object_mut() {
+                params_obj.insert(
+                    "required".to_string(),
+                    serde_json::Value::Array(all_property_names),
+                );
+            }
+        }
+    }
+
     Tool::Function(FunctionTool {
         name: tool.name.clone(),
-        parameters: tool.parameters.clone(),
-        strict: tool.strict.unwrap_or(true),
+        parameters,
+        strict,
         r#type: FunctionType::Function,
         description: tool.description.clone(),
     })
@@ -593,4 +644,88 @@ fn create_function_tool_choice(tool_choice: core::types::ToolChoice) -> ToolChoi
             }))
         }
     }
+}
+
+fn convert_messages_to_openai_format(
+    messages: Vec<ConversationMessage>,
+) -> Result<Vec<InputItem>, LlmError> {
+    messages
+        .into_iter()
+        .map(|msg| match msg {
+            core::types::ConversationMessage::Chat(m) => Ok(InputItem::Message(InputMessage {
+                role: match m.role {
+                    core::types::ChatRole::System => InputMessageRole::System,
+                    core::types::ChatRole::User => InputMessageRole::User,
+                    core::types::ChatRole::Assistant => InputMessageRole::Assistant,
+                },
+                content: m.content,
+            })),
+            core::types::ConversationMessage::ToolCall(tc) => {
+                Ok(InputItem::FunctionCall(FunctionToolCall {
+                    r#type: "function_call".to_string(),
+                    id: tc.id,
+                    call_id: tc.call_id,
+                    name: tc.name,
+                    arguments: serde_json::Value::String(
+                        serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                    ),
+                }))
+            }
+            core::types::ConversationMessage::ToolCallResult(tr) => {
+                Ok(InputItem::FunctionCallOutput(FunctionToolCallOutput {
+                    call_id: tr.tool_call_id,
+                    output: serde_json::Value::String(tr.content),
+                    r#type: "function_call_output".to_string(),
+                }))
+            }
+        })
+        .collect()
+}
+
+fn create_format_for_type<T>() -> Result<Format, LlmError>
+where
+    T: schemars::JsonSchema,
+{
+    let s = schema_for!(T);
+
+    let schema_name = s
+        .schema
+        .metadata
+        .as_ref()
+        .and_then(|meta| meta.title.as_ref())
+        .ok_or_else(|| LlmError::Provider {
+            message: "Failed to build JSON Schema: Missing schema name".to_string(),
+            source: None,
+        })?
+        .clone();
+
+    let mut schema_value = serde_json::to_value(&s).map_err(|e| LlmError::Parse {
+        message: "Failed to build JSON Schema".to_string(),
+        source: Box::new(e),
+    })?;
+
+    let needs_wrapping = schema_value
+        .get("type")
+        .and_then(|t| t.as_str())
+        .map(|t| t != "object")
+        .unwrap_or(false);
+
+    if needs_wrapping {
+        schema_value = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "value": schema_value
+            },
+            "required": ["value"],
+            "additionalProperties": false
+        })
+    }
+
+    Ok(Format {
+        format: FormatType::JsonSchema(JsonSchema {
+            name: schema_name,
+            schema: schema_value,
+            r#type: JsonSchemaType::JsonSchema,
+        }),
+    })
 }
