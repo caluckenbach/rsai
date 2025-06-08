@@ -95,7 +95,7 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
     // Generate the complete code with tools array and type-safe choice enum
     let expanded = quote! {
         {
-            use ai::core::{ToolFunction, types::{Tool, ToolChoice}};
+            use rsai::core::{ToolFunction, types::{Tool, ToolChoice}};
             
             // Type-safe tool choice enum for this specific tool set
             #[derive(Debug, Clone, PartialEq)]
@@ -119,12 +119,12 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
             
             // Use the ToolSet type from core::types
             
-            let mut registry = ai::core::types::ToolRegistry::new();
+            let mut registry = rsai::core::types::ToolRegistry::new();
             #(
                 registry.register(std::sync::Arc::new(#wrapper_names));
             )*
             
-            ai::core::types::ToolSet {
+            rsai::core::types::ToolSet {
                 registry,
             }
         }

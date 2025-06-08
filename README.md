@@ -5,7 +5,7 @@ A Rust library for creating AI-powered agents with tool usage capabilities.
 ## Quick Start
 
 ```rust
-use ai::{llm, Message, ChatRole, ApiKey, completion_schema};
+use rsai::{llm, Message, ChatRole, ApiKey, completion_schema};
 
 #[completion_schema]
 struct Analysis {

@@ -1,4 +1,4 @@
-use ai::{ApiKey, ChatRole, Message, completion_schema, llm};
+use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
 use dotenv::dotenv;
 
 #[completion_schema]

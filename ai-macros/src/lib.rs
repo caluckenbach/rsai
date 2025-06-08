@@ -12,7 +12,7 @@ mod tools;
 ///
 /// Usage:
 /// ```rust,ignore
-/// use ai_macros::completion_schema;
+/// use rsai_macros::completion_schema;
 ///
 /// #[completion_schema]
 /// struct Response {
@@ -46,7 +46,7 @@ pub fn completion_schema(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Usage:
 /// ```rust
-/// use ai_macros::tool;
+/// use rsai_macros::tool;
 ///
 /// #[tool]
 /// /// Get current weather for a city
@@ -71,7 +71,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Usage:
 /// ```rust
-/// use ai_macros::{tool, toolset};
+/// use rsai_macros::{tool, toolset};
 ///
 /// #[tool]
 /// /// Get current weather for a city

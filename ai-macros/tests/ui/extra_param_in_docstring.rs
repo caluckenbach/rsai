@@ -1,6 +1,6 @@
 // Use the actual types from the main crate
-use ai::core::{ToolFunction, types::Tool, error::LlmError};
-use ai_macros::tool;
+use rsai::core::{ToolFunction, types::Tool, error::LlmError};
+use rsai_macros::tool;
 
 #[tool]
 /// Function with extra parameter in docstring

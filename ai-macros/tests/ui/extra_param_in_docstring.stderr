@@ -5,9 +5,9 @@ error: Parameter 'nonexistent' found in docstring but not in function parameters
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 warning: unused imports: `ToolFunction`, `error::LlmError`, and `types::Tool`
- --> tests/ui/extra_param_in_docstring.rs:2:16
+ --> tests/ui/extra_param_in_docstring.rs:2:18
   |
-2 | use ai::core::{ToolFunction, types::Tool, error::LlmError};
-  |                ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+2 | use rsai::core::{ToolFunction, types::Tool, error::LlmError};
+  |                  ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
   |
   = note: `#[warn(unused_imports)]` on by default

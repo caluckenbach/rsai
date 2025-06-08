@@ -3,12 +3,12 @@ members = [".", "ai-macros"]
 resolver = "2"
 
 [package]
-name = "ai"
+name = "rsai"
 version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ai-macros = { path = "ai-macros" }
+rsai-macros = { path = "ai-macros" }
 async-trait = "0.1.87"
 bytes = "1.10.1"
 futures = "0.3.31"
