@@ -7,12 +7,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Message {
-    pub role: ChatRole,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {
     System,
     User,
@@ -20,19 +14,31 @@ pub enum ChatRole {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ConversationMessage {
-    Chat(Message),
-    ToolCall(ToolCall),
-    ToolResult(ToolResult),
+pub struct Message {
+    pub role: ChatRole,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct StructuredRequest {
-    pub model: String,
-    pub messages: Vec<ConversationMessage>,
-    pub tools: Option<Box<[Tool]>>,
-    pub tool_choice: Option<ToolChoice>,
-    pub parallel_tool_calls: Option<bool>,
+pub struct ToolCall {
+    pub id: String,
+    pub call_id: String,
+    pub name: String,
+    pub arguments: Value,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolCallResult {
+    pub id: String,
+    pub tool_call_id: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConversationMessage {
+    Chat(Message),
+    ToolCall(ToolCall),
+    ToolCallResult(ToolCallResult),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +55,15 @@ pub enum ToolChoice {
     Auto,
     Required,
     Function { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructuredRequest {
+    pub model: String,
+    pub messages: Vec<ConversationMessage>,
+    pub tools: Option<Box<[Tool]>>,
+    pub tool_choice: Option<ToolChoice>,
+    pub parallel_tool_calls: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,19 +87,6 @@ pub struct ResponseMetadata {
     pub id: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolCall {
-    pub id: String,
-    pub name: String,
-    pub arguments: Value,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToolResult {
-    pub tool_call_id: String,
-    pub content: String,
-}
-
 pub struct ToolRegistry {
     tools: HashMap<String, Arc<dyn ToolFunction>>,
 }
@@ -105,16 +107,25 @@ impl ToolRegistry {
         self.tools.values().map(|tool| tool.schema()).collect()
     }
 
-    pub async fn execute(&self, tool_call: &ToolCall) -> Result<String, crate::core::error::LlmError> {
+    pub async fn execute(
+        &self,
+        tool_call: &ToolCall,
+    ) -> Result<String, crate::core::error::LlmError> {
         if let Some(tool) = self.tools.get(&tool_call.name) {
             let result = tool.execute(tool_call.arguments.clone()).await?;
-            Ok(result.to_string())
+            // If result is a JSON string, extract the actual string value
+            // Otherwise, serialize the result as JSON
+            match result {
+                serde_json::Value::String(s) => Ok(s),
+                other => Ok(other.to_string()),
+            }
         } else {
-            Err(crate::core::error::LlmError::ToolNotFound(tool_call.name.clone()))
+            Err(crate::core::error::LlmError::ToolNotFound(
+                tool_call.name.clone(),
+            ))
         }
     }
 }
-
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
