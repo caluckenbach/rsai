@@ -97,6 +97,7 @@ mod tests {
         // Test successful execution of get_weather
         let weather_call = ToolCall {
             id: "call_1".to_string(),
+            call_id: "call_1".to_string(),
             name: "get_weather".to_string(),
             arguments: json!({
                 "_city": "New York",
@@ -111,6 +112,7 @@ mod tests {
         // Test successful execution of calculate_distance
         let distance_call = ToolCall {
             id: "call_2".to_string(),
+            call_id: "call_2".to_string(),
             name: "calculate_distance".to_string(),
             arguments: json!({
                 "_from": "New York",
@@ -130,6 +132,7 @@ mod tests {
         // Test execution with non-existent tool
         let invalid_call = ToolCall {
             id: "call_invalid".to_string(),
+            call_id: "call_invalid".to_string(),
             name: "non_existent_tool".to_string(),
             arguments: json!({}),
         };
@@ -201,6 +204,7 @@ mod tests {
         // Create tool call based on schema
         let tool_call = ToolCall {
             id: "test_call".to_string(),
+            call_id: "test_call".to_string(),
             name: weather_schema.name.clone(),
             arguments: json!({
                 "_city": "San Francisco",
@@ -220,6 +224,7 @@ mod tests {
         
         let distance_call = ToolCall {
             id: "distance_call".to_string(),
+            call_id: "distance_call".to_string(),
             name: distance_schema.name.clone(),
             arguments: json!({
                 "_from": "Los Angeles",
@@ -239,6 +244,7 @@ mod tests {
         // Test with optional parameter provided
         let call_with_unit = ToolCall {
             id: "call_1".to_string(),
+            call_id: "call_1".to_string(),
             name: "get_weather".to_string(),
             arguments: json!({
                 "_city": "Tokyo",
@@ -252,6 +258,7 @@ mod tests {
         // Test without optional parameter (unit should default to None)
         let call_without_unit = ToolCall {
             id: "call_2".to_string(),
+            call_id: "call_2".to_string(),
             name: "get_weather".to_string(),
             arguments: json!({
                 "_city": "Tokyo"
