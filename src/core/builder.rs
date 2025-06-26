@@ -7,17 +7,19 @@ use crate::provider::openai::{self};
 use super::{
     error::LlmError,
     traits::LlmProvider,
-    types::{ConversationMessage, Message, StructuredRequest, StructuredResponse, Tool, ToolChoice, ToolRegistry},
+    types::{
+        ConversationMessage, Message, StructuredRequest, StructuredResponse, Tool, ToolChoice,
+        ToolRegistry,
+    },
 };
 
 mod private {
-    pub struct Init;
     pub struct ProviderSet;
     pub struct ApiKeySet;
     pub struct Configuring;
     pub struct MessagesSet;
     pub struct ToolsSet;
-    
+
     /// Marker trait for states that can call complete()
     pub trait Completable {}
     impl Completable for MessagesSet {}
@@ -49,27 +51,6 @@ impl<State> LlmBuilder<State> {
 
     pub(crate) fn get_api_key(&self) -> Option<&str> {
         self.api_key.as_deref()
-    }
-}
-
-impl LlmBuilder<private::Init> {
-    /// Set the provider for the LLM request.
-    /// Currently supports "openai".
-    pub fn provider(self, provider: &str) -> Result<LlmBuilder<private::ProviderSet>, LlmError> {
-        match provider {
-            "openai" => Ok(LlmBuilder {
-                provider: Some(provider.to_string()),
-                model: None,
-                messages: None,
-                api_key: None,
-                tools: None,
-                tool_choice: None,
-                parallel_tool_calls: None,
-                tool_registry: None,
-                _state: PhantomData,
-            }),
-            _ => Err(LlmError::Builder("Unsupported Provider".to_string())),
-        }
     }
 }
 
@@ -190,8 +171,7 @@ impl<State: private::Completable> LlmBuilder<State> {
     ///     confidence: f32,
     /// }
     ///
-    /// let analysis = llm::call()
-    ///     .provider("openai")?
+    /// let analysis = llm::with("openai")?
     ///     .api_key(ApiKey::Default)?
     ///     .model("gpt-4o-mini")
     ///     .messages(vec![Message {
@@ -223,7 +203,7 @@ impl<State: private::Completable> LlmBuilder<State> {
                     .into_iter()
                     .map(|msg| ConversationMessage::Chat(msg))
                     .collect();
-                
+
                 let req = StructuredRequest {
                     model: model_string,
                     messages: conversation_messages,
@@ -232,7 +212,9 @@ impl<State: private::Completable> LlmBuilder<State> {
                     parallel_tool_calls: self.parallel_tool_calls,
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
-                client.generate_structured(req, self.tool_registry.as_ref()).await
+                client
+                    .generate_structured(req, self.tool_registry.as_ref())
+                    .await
             }
             _ => todo!(),
         }
@@ -276,25 +258,44 @@ impl LlmBuilder<private::ToolsSet> {
         self.parallel_tool_calls = Some(enabled);
         self
     }
-
 }
 
 /// Module containing the main entry point for building LLM requests
 pub mod llm {
     use super::*;
 
-    /// Create a new LLM builder to start constructing a request
-    pub fn call() -> LlmBuilder<private::Init> {
-        LlmBuilder {
-            provider: None,
-            model: None,
-            messages: None,
-            api_key: None,
-            tools: None,
-            tool_choice: None,
-            parallel_tool_calls: None,
-            tool_registry: None,
-            _state: PhantomData,
+    /// Create a new LLM builder with the specified provider.
+    /// Currently supports "openai".
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use rsai::{llm, ApiKey};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let builder = llm::with("openai")?
+    ///     .api_key(ApiKey::Default)?
+    ///     .model("gpt-4o-mini");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn with(
+        provider: &str,
+    ) -> Result<LlmBuilder<private::ProviderSet>, crate::core::error::LlmError> {
+        match provider {
+            "openai" => Ok(LlmBuilder {
+                provider: Some(provider.to_string()),
+                model: None,
+                messages: None,
+                api_key: None,
+                tools: None,
+                tool_choice: None,
+                parallel_tool_calls: None,
+                tool_registry: None,
+                _state: PhantomData,
+            }),
+            _ => Err(crate::core::error::LlmError::Builder(
+                "Unsupported Provider".to_string(),
+            )),
         }
     }
 }

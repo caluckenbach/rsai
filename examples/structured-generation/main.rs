@@ -11,8 +11,7 @@ struct Analysis {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
-    let analysis = llm::call()
-        .provider("openai")?
+    let analysis = llm::with("openai")?
         .api_key(ApiKey::Default)?
         .model("gpt-4o-mini")
         .messages(vec![Message {

@@ -69,8 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     ];
 
-    let response = llm::call()
-        .provider("openai")?
+    let response = llm::with("openai")?
         .api_key(ApiKey::Default)?
         .model("gpt-4o-mini")
         .messages(messages)
