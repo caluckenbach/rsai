@@ -1,5 +1,5 @@
-use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
 use dotenv::dotenv;
+use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
 
 #[completion_schema]
 struct Analysis {

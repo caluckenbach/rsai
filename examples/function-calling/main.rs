@@ -1,6 +1,6 @@
+use dotenv::dotenv;
 use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
 use rsai_macros::{tool, toolset};
-use dotenv::dotenv;
 
 #[tool]
 /// Get current weather for a city
