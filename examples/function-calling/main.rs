@@ -1,5 +1,5 @@
 use dotenv::dotenv;
-use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
+use rsai::{ApiKey, ChatRole, Message, Provider, completion_schema, llm};
 use rsai_macros::{tool, toolset};
 
 #[tool]
@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     ];
 
-    let response = llm::with("openai")?
+    let response = llm::with(Provider::OpenAI)
         .api_key(ApiKey::Default)?
         .model("gpt-4o-mini")
         .messages(messages)

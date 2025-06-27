@@ -2,7 +2,7 @@ use std::{env, marker::PhantomData};
 
 use serde::de::Deserialize;
 
-use crate::provider::openai::{self};
+use crate::provider::{Provider, openai};
 
 use super::{
     error::LlmError,
@@ -29,7 +29,7 @@ mod private {
 /// Builder fields that are shared across all states
 struct BuilderFields {
     // Core configuration
-    provider: Option<String>,
+    provider: Option<Provider>,
     api_key: Option<String>,
     model: Option<String>,
 
@@ -63,6 +63,31 @@ impl BuilderFields {
             temperature: None,
             top_p: None,
         }
+    }
+
+    /// Validate that all required fields are present
+    fn validate(&self) -> Result<(&Vec<Message>, Provider, &str), LlmError> {
+        self.api_key.as_ref().ok_or(LlmError::Builder(
+            "Missing API key. Make sure to specify an API key.".into(),
+        ))?;
+
+        let messages = self
+            .messages
+            .as_ref()
+            .filter(|messages| !messages.is_empty())
+            .ok_or(LlmError::Builder(
+                "Missing messages. Make sure to add at least one message.".to_string(),
+            ))?;
+
+        let provider = self.provider.ok_or(LlmError::Builder(
+            "Missing provider. Make sure to specify a provider.".into(),
+        ))?;
+
+        let model = self.model.as_ref().ok_or(LlmError::Builder(
+            "Missing model. Make sure to specify a model.".into(),
+        ))?;
+
+        Ok((messages, provider, model))
     }
 }
 
@@ -108,16 +133,18 @@ impl LlmBuilder<private::ProviderSet> {
     /// Use `ApiKey::Default` to load from environment variables or `ApiKey::Custom` for a custom key.
     pub fn api_key(mut self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet>, LlmError> {
         let key = match api_key {
-            ApiKey::Default => match self.fields.provider.as_deref() {
-                Some("openai") => env::var("OPENAI_API_KEY").map_err(|_| {
-                    LlmError::Builder("Missing OPENAI_API_KEY environment variable".to_string())
-                })?,
-                _ => {
-                    return Err(LlmError::Builder(
-                        "Can't load API Key for unsupported Provider".to_string(),
-                    ));
-                }
-            },
+            ApiKey::Default => {
+                let provider = self.fields.provider.ok_or(LlmError::Builder(
+                    "Provider must be set before API key".into(),
+                ))?;
+
+                env::var(provider.default_api_key_env_var()).map_err(|_| {
+                    LlmError::Builder(format!(
+                        "Missing {} environment variable",
+                        provider.default_api_key_env_var()
+                    ))
+                })?
+            }
             ApiKey::Custom(custom_key) => custom_key,
         };
 
@@ -140,33 +167,6 @@ impl LlmBuilder<private::Configuring> {
         self.fields.messages = Some(messages);
         self.transition_state()
     }
-}
-
-fn validate_builder<State>(
-    builder: &LlmBuilder<State>,
-) -> Result<(&Vec<Message>, &str, &str), LlmError> {
-    builder.fields.api_key.as_ref().ok_or(LlmError::Builder(
-        "Missing API key. Make sure to specify an API key.".into(),
-    ))?;
-
-    let messages = builder
-        .fields
-        .messages
-        .as_ref()
-        .filter(|messages| !messages.is_empty())
-        .ok_or(LlmError::Builder(
-            "Missing messages. Make sure to add at least one message.".to_string(),
-        ))?;
-
-    let provider = builder.fields.provider.as_ref().ok_or(LlmError::Builder(
-        "Missing provider. Make sure to specify a provider.".into(),
-    ))?;
-
-    let model = builder.fields.model.as_ref().ok_or(LlmError::Builder(
-        "Missing model. Make sure to specify a model.".into(),
-    ))?;
-
-    Ok((messages, provider, model))
 }
 
 impl<State: private::Completable> LlmBuilder<State> {
@@ -197,7 +197,7 @@ impl<State: private::Completable> LlmBuilder<State> {
     ///
     /// # Example
     /// ```no_run
-    /// # use rsai::{completion_schema, llm, Message, ChatRole, ApiKey};
+    /// # use rsai::{completion_schema, llm, Message, ChatRole, ApiKey, Provider};
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// #[completion_schema]
@@ -206,7 +206,7 @@ impl<State: private::Completable> LlmBuilder<State> {
     ///     confidence: f32,
     /// }
     ///
-    /// let analysis = llm::with("openai")?
+    /// let analysis = llm::with(Provider::OpenAI)
     ///     .api_key(ApiKey::Default)?
     ///     .model("gpt-4o-mini")
     ///     .messages(vec![Message {
@@ -222,15 +222,16 @@ impl<State: private::Completable> LlmBuilder<State> {
     where
         T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
     {
-        let (messages, provider, model) = validate_builder(&self)?;
+        let (messages, provider, model) = self.fields.validate()?;
         let model_string = model.to_string();
         let messages = messages.to_vec();
 
         match provider {
-            "openai" => {
+            Provider::OpenAI => {
                 if self.fields.api_key.is_none() {
-                    let api_key = env::var("OPENAI_API_KEY")
-                        .map_err(|_| LlmError::Builder("Missing OPENAI_API_KEY.".to_string()))?;
+                    let api_key = env::var(provider.default_api_key_env_var()).map_err(|_| {
+                        LlmError::Builder(format!("Missing {}", provider.default_api_key_env_var()))
+                    })?;
                     self.set_api_key(&api_key);
                 }
 
@@ -258,7 +259,6 @@ impl<State: private::Completable> LlmBuilder<State> {
                     .generate_structured(req, self.fields.tool_registry.as_ref())
                     .await
             }
-            _ => todo!(),
         }
     }
 }
@@ -300,34 +300,25 @@ pub mod llm {
     use super::*;
 
     /// Create a new LLM builder with the specified provider.
-    /// Currently supports "openai".
     ///
     /// # Example
     /// ```no_run
-    /// # use rsai::{llm, ApiKey};
+    /// # use rsai::{llm, ApiKey, Provider};
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// let builder = llm::with("openai")?
+    /// let builder = llm::with(Provider::OpenAI)
     ///     .api_key(ApiKey::Default)?
     ///     .model("gpt-4o-mini");
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with(
-        provider: &str,
-    ) -> Result<LlmBuilder<private::ProviderSet>, crate::core::error::LlmError> {
-        match provider {
-            "openai" => {
-                let mut fields = BuilderFields::new();
-                fields.provider = Some(provider.to_string());
-                Ok(LlmBuilder {
-                    fields,
-                    _state: PhantomData,
-                })
-            }
-            _ => Err(crate::core::error::LlmError::Builder(
-                "Unsupported Provider".to_string(),
-            )),
+    pub fn with(provider: Provider) -> LlmBuilder<private::ProviderSet> {
+        let mut fields = BuilderFields::new();
+        fields.provider = Some(provider);
+
+        LlmBuilder {
+            fields,
+            _state: PhantomData,
         }
     }
 }

@@ -1,5 +1,5 @@
 use dotenv::dotenv;
-use rsai::{ApiKey, ChatRole, Message, completion_schema, llm};
+use rsai::{ApiKey, ChatRole, Message, Provider, completion_schema, llm};
 
 #[completion_schema]
 struct Analysis {
@@ -11,7 +11,7 @@ struct Analysis {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv().ok();
 
-    let analysis = llm::with("openai")?
+    let analysis = llm::with(Provider::OpenAI)
         .api_key(ApiKey::Default)?
         .model("gpt-4o-mini")
         .messages(vec![Message {
