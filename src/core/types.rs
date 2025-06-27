@@ -61,9 +61,32 @@ pub enum ToolChoice {
 pub struct StructuredRequest {
     pub model: String,
     pub messages: Vec<ConversationMessage>,
+    pub tool_config: Option<ToolConfig>,
+    pub generation_config: Option<GenerationConfig>,
+}
+
+/// Configuration for tool calling behavior
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolConfig {
+    /// Available tools for the model to call
     pub tools: Option<Box<[Tool]>>,
+    /// Strategy for choosing which tools to call
     pub tool_choice: Option<ToolChoice>,
+    /// Whether to allow parallel tool calls (default: true)
     pub parallel_tool_calls: Option<bool>,
+}
+
+/// Configuration for text generation parameters
+#[derive(Debug, Clone, PartialEq)]
+pub struct GenerationConfig {
+    /// Maximum number of tokens to generate
+    pub max_tokens: Option<u32>,
+
+    /// Sampling temperature
+    pub temperature: Option<f32>,
+
+    /// Nucleus sampling parameter (0.0 to 1.0)
+    pub top_p: Option<f32>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
