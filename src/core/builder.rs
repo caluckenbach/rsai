@@ -218,7 +218,7 @@ impl<State: private::Completable> LlmBuilder<State> {
     /// # Ok(())
     /// # }
     /// ```
-    pub async fn complete<T>(mut self) -> Result<StructuredResponse<T>, LlmError>
+    pub async fn complete<T>(self) -> Result<StructuredResponse<T>, LlmError>
     where
         T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
     {
@@ -228,13 +228,6 @@ impl<State: private::Completable> LlmBuilder<State> {
 
         match provider {
             Provider::OpenAI => {
-                if self.fields.api_key.is_none() {
-                    let api_key = env::var(provider.default_api_key_env_var()).map_err(|_| {
-                        LlmError::Builder(format!("Missing {}", provider.default_api_key_env_var()))
-                    })?;
-                    self.set_api_key(&api_key);
-                }
-
                 let conversation_messages: Vec<ConversationMessage> = messages
                     .into_iter()
                     .map(ConversationMessage::Chat)
