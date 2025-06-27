@@ -210,8 +210,7 @@ fn validate_parameter_descriptions(
             return Err(syn::Error::new_spanned(
                 sig,
                 format!(
-                    "Parameter '{}' found in docstring but not in function parameters",
-                    docstring_param
+                    "Parameter '{docstring_param}' found in docstring but not in function parameters"
                 ),
             ));
         }

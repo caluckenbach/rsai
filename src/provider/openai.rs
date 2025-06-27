@@ -89,7 +89,7 @@ impl OpenAiClient {
                 .clone();
 
             return Err(LlmError::Api {
-                message: format!("OpenAI API returned error: {}", error_text),
+                message: format!("OpenAI API returned error: {error_text}"),
                 status_code: Some(status.as_u16()),
                 source: None,
             });
@@ -162,7 +162,7 @@ impl OpenAiClient {
                     let arguments = match &function_call.arguments {
                         serde_json::Value::String(s) => {
                             serde_json::from_str(s).map_err(|e| LlmError::Parse {
-                                message: format!("Failed to parse tool arguments: {}", s),
+                                message: format!("Failed to parse tool arguments: {s}"),
                                 source: Box::new(e),
                             })?
                         }
@@ -204,7 +204,7 @@ impl OpenAiClient {
                     let arguments = match &function_call.arguments {
                         serde_json::Value::String(s) => {
                             serde_json::from_str(s).map_err(|e| LlmError::Parse {
-                                message: format!("Failed to parse tool arguments: {}", s),
+                                message: format!("Failed to parse tool arguments: {s}"),
                                 source: Box::new(e),
                             })?
                         }
