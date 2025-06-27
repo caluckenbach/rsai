@@ -5,7 +5,7 @@ A Rust library for creating AI-powered agents with tool usage capabilities.
 ## Quick Start
 
 ```rust
-use rsai::{llm, Message, ChatRole, ApiKey, completion_schema};
+use rsai::{llm, Message, ChatRole, ApiKey, Provider, completion_schema};
 
 #[completion_schema]
 struct Analysis {
@@ -13,7 +13,7 @@ struct Analysis {
     confidence: f32,
 }
 
-let analysis = llm::with("openai")?
+let analysis = llm::with(Provider::OpenAI)
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
@@ -43,7 +43,7 @@ struct MovieReview {
     summary: String,
 }
 
-let review = llm::with("openai")?
+let review = llm::with(Provider::OpenAI)
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
@@ -65,7 +65,7 @@ enum Priority {
     Critical,
 }
 
-let priority = llm::with("openai")?
+let priority = llm::with(Provider::OpenAI)
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
@@ -87,7 +87,7 @@ enum TaskStatus {
     Blocked { reason: String },
 }
 
-let status = llm::with("openai")?
+let status = llm::with(Provider::OpenAI)
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
