@@ -8,8 +8,8 @@ use super::{
     error::LlmError,
     traits::LlmProvider,
     types::{
-        ConversationMessage, Message, StructuredRequest, StructuredResponse, Tool, ToolChoice,
-        ToolRegistry,
+        ConversationMessage, GenerationConfig, Message, StructuredRequest, StructuredResponse,
+        Tool, ToolChoice, ToolConfig, ToolRegistry,
     },
 };
 
@@ -26,31 +26,72 @@ mod private {
     impl Completable for ToolsSet {}
 }
 
-/// A type-safe builder for constructing LLM requests using the builder pattern.
-/// The builder enforces correct construction order through phantom types.
-pub struct LlmBuilder<State> {
+/// Builder fields that are shared across all states
+struct BuilderFields {
+    // Core configuration
     provider: Option<String>,
-    model: Option<String>,
-    messages: Option<Vec<Message>>,
     api_key: Option<String>,
+    model: Option<String>,
+
+    // Request content
+    messages: Option<Vec<Message>>,
+
+    // Tool configuration
     tools: Option<Box<[Tool]>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
     tool_registry: Option<ToolRegistry>,
+
+    // Generation parameters
+    max_tokens: Option<u32>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+}
+
+impl BuilderFields {
+    fn new() -> Self {
+        Self {
+            provider: None,
+            api_key: None,
+            model: None,
+            messages: None,
+            tools: None,
+            tool_choice: None,
+            parallel_tool_calls: None,
+            tool_registry: None,
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+        }
+    }
+}
+
+/// A type-safe builder for constructing LLM requests using the builder pattern.
+/// The builder enforces correct construction order through phantom types.
+pub struct LlmBuilder<State> {
+    fields: BuilderFields,
     _state: PhantomData<State>,
 }
 
 impl<State> LlmBuilder<State> {
+    /// Transition to a new builder state while preserving all field values
+    fn transition_state<NewState>(self) -> LlmBuilder<NewState> {
+        LlmBuilder {
+            fields: self.fields,
+            _state: PhantomData,
+        }
+    }
+
     pub(crate) fn get_model(&self) -> Option<&str> {
-        self.model.as_deref()
+        self.fields.model.as_deref()
     }
 
     pub(crate) fn set_api_key(&mut self, api_key: &str) {
-        self.api_key = Some(api_key.to_string());
+        self.fields.api_key = Some(api_key.to_string());
     }
 
     pub(crate) fn get_api_key(&self) -> Option<&str> {
-        self.api_key.as_deref()
+        self.fields.api_key.as_deref()
     }
 }
 
@@ -65,9 +106,9 @@ pub enum ApiKey {
 impl LlmBuilder<private::ProviderSet> {
     /// Set the API key for the provider.
     /// Use `ApiKey::Default` to load from environment variables or `ApiKey::Custom` for a custom key.
-    pub fn api_key(self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet>, LlmError> {
+    pub fn api_key(mut self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet>, LlmError> {
         let key = match api_key {
-            ApiKey::Default => match self.provider.as_deref() {
+            ApiKey::Default => match self.fields.provider.as_deref() {
                 Some("openai") => env::var("OPENAI_API_KEY").map_err(|_| {
                     LlmError::Builder("Missing OPENAI_API_KEY environment variable".to_string())
                 })?,
@@ -80,62 +121,36 @@ impl LlmBuilder<private::ProviderSet> {
             ApiKey::Custom(custom_key) => custom_key,
         };
 
-        Ok(LlmBuilder {
-            provider: self.provider,
-            model: None,
-            messages: None,
-            api_key: Some(key),
-            tools: None,
-            tool_choice: None,
-            parallel_tool_calls: None,
-            tool_registry: None,
-            _state: PhantomData,
-        })
+        self.fields.api_key = Some(key);
+        Ok(self.transition_state())
     }
 }
 
 impl LlmBuilder<private::ApiKeySet> {
     /// Set the model to use for the LLM request.
-    pub fn model(self, model_id: &str) -> LlmBuilder<private::Configuring> {
-        LlmBuilder {
-            provider: self.provider,
-            model: Some(model_id.to_string()),
-            messages: None,
-            api_key: self.api_key,
-            tools: None,
-            tool_choice: None,
-            parallel_tool_calls: None,
-            tool_registry: None,
-            _state: PhantomData,
-        }
+    pub fn model(mut self, model_id: &str) -> LlmBuilder<private::Configuring> {
+        self.fields.model = Some(model_id.to_string());
+        self.transition_state()
     }
 }
 
 impl LlmBuilder<private::Configuring> {
     /// Set the messages for the conversation.
-    pub fn messages(self, messages: Vec<Message>) -> LlmBuilder<private::MessagesSet> {
-        LlmBuilder {
-            provider: self.provider,
-            model: self.model,
-            messages: Some(messages),
-            api_key: self.api_key,
-            tools: self.tools,
-            tool_choice: self.tool_choice,
-            parallel_tool_calls: self.parallel_tool_calls,
-            tool_registry: self.tool_registry,
-            _state: PhantomData,
-        }
+    pub fn messages(mut self, messages: Vec<Message>) -> LlmBuilder<private::MessagesSet> {
+        self.fields.messages = Some(messages);
+        self.transition_state()
     }
 }
 
 fn validate_builder<State>(
     builder: &LlmBuilder<State>,
 ) -> Result<(&Vec<Message>, &str, &str), LlmError> {
-    builder.api_key.as_ref().ok_or(LlmError::Builder(
+    builder.fields.api_key.as_ref().ok_or(LlmError::Builder(
         "Missing API key. Make sure to specify an API key.".into(),
     ))?;
 
     let messages = builder
+        .fields
         .messages
         .as_ref()
         .filter(|messages| !messages.is_empty())
@@ -143,11 +158,11 @@ fn validate_builder<State>(
             "Missing messages. Make sure to add at least one message.".to_string(),
         ))?;
 
-    let provider = builder.provider.as_ref().ok_or(LlmError::Builder(
+    let provider = builder.fields.provider.as_ref().ok_or(LlmError::Builder(
         "Missing provider. Make sure to specify a provider.".into(),
     ))?;
 
-    let model = builder.model.as_ref().ok_or(LlmError::Builder(
+    let model = builder.fields.model.as_ref().ok_or(LlmError::Builder(
         "Missing model. Make sure to specify a model.".into(),
     ))?;
 
@@ -155,6 +170,26 @@ fn validate_builder<State>(
 }
 
 impl<State: private::Completable> LlmBuilder<State> {
+    /// Set the maximum number of tokens to generate.
+    pub fn max_tokens(mut self, max_tokens: u32) -> Self {
+        self.fields.max_tokens = Some(max_tokens);
+        self
+    }
+
+    /// Set the temperature for generation (0.0 to 2.0).
+    /// Lower values make output more focused and deterministic.
+    pub fn temperature(mut self, temperature: f32) -> Self {
+        self.fields.temperature = Some(temperature);
+        self
+    }
+
+    /// Set the top_p value for nucleus sampling (0.0 to 1.0).
+    /// An alternative to temperature; use one or the other, not both.
+    pub fn top_p(mut self, top_p: f32) -> Self {
+        self.fields.top_p = Some(top_p);
+        self
+    }
+
     /// Execute the LLM request and return structured output of type T.
     /// The type T must implement Deserialize and JsonSchema for structured output generation as well as
     /// be annotated with `#[schemars(deny_unknown_fields)]`.
@@ -193,7 +228,7 @@ impl<State: private::Completable> LlmBuilder<State> {
 
         match provider {
             "openai" => {
-                if self.api_key.is_none() {
+                if self.fields.api_key.is_none() {
                     let api_key = env::var("OPENAI_API_KEY")
                         .map_err(|_| LlmError::Builder("Missing OPENAI_API_KEY.".to_string()))?;
                     self.set_api_key(&api_key);
@@ -207,13 +242,20 @@ impl<State: private::Completable> LlmBuilder<State> {
                 let req = StructuredRequest {
                     model: model_string,
                     messages: conversation_messages,
-                    tools: self.tools.clone(),
-                    tool_choice: self.tool_choice.clone(),
-                    parallel_tool_calls: self.parallel_tool_calls,
+                    tool_config: Some(ToolConfig {
+                        tools: self.fields.tools.clone(),
+                        tool_choice: self.fields.tool_choice.clone(),
+                        parallel_tool_calls: self.fields.parallel_tool_calls,
+                    }),
+                    generation_config: Some(GenerationConfig {
+                        max_tokens: self.fields.max_tokens,
+                        temperature: self.fields.temperature,
+                        top_p: self.fields.top_p,
+                    }),
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
                 client
-                    .generate_structured(req, self.tool_registry.as_ref())
+                    .generate_structured(req, self.fields.tool_registry.as_ref())
                     .await
             }
             _ => todo!(),
@@ -226,18 +268,11 @@ impl LlmBuilder<private::MessagesSet> {
     /// This transitions to the ToolsSet state where tool_choice and parallel_tool_calls can be configured.
     ///
     /// By default parallel tool calling is enabled. This can be changed by calling `parallel_tool_calls` with `false`.
-    pub fn tools(self, toolset: super::types::ToolSet) -> LlmBuilder<private::ToolsSet> {
-        LlmBuilder {
-            provider: self.provider,
-            model: self.model,
-            messages: self.messages,
-            api_key: self.api_key,
-            tools: Some(toolset.tools().into_boxed_slice()),
-            tool_choice: self.tool_choice,
-            parallel_tool_calls: Some(true),
-            tool_registry: Some(toolset.registry),
-            _state: PhantomData,
-        }
+    pub fn tools(mut self, toolset: super::types::ToolSet) -> LlmBuilder<private::ToolsSet> {
+        self.fields.tools = Some(toolset.tools().into_boxed_slice());
+        self.fields.parallel_tool_calls = Some(true);
+        self.fields.tool_registry = Some(toolset.registry);
+        self.transition_state()
     }
 }
 
@@ -248,14 +283,14 @@ impl LlmBuilder<private::ToolsSet> {
     where
         TC: Into<ToolChoice>,
     {
-        self.tool_choice = Some(choice.into());
+        self.fields.tool_choice = Some(choice.into());
         self
     }
 
     /// Set whether to enable parallel tool calls.
     /// When true, the model can call multiple tools simultaneously.
     pub fn parallel_tool_calls(mut self, enabled: bool) -> Self {
-        self.parallel_tool_calls = Some(enabled);
+        self.fields.parallel_tool_calls = Some(enabled);
         self
     }
 }
@@ -282,17 +317,14 @@ pub mod llm {
         provider: &str,
     ) -> Result<LlmBuilder<private::ProviderSet>, crate::core::error::LlmError> {
         match provider {
-            "openai" => Ok(LlmBuilder {
-                provider: Some(provider.to_string()),
-                model: None,
-                messages: None,
-                api_key: None,
-                tools: None,
-                tool_choice: None,
-                parallel_tool_calls: None,
-                tool_registry: None,
-                _state: PhantomData,
-            }),
+            "openai" => {
+                let mut fields = BuilderFields::new();
+                fields.provider = Some(provider.to_string());
+                Ok(LlmBuilder {
+                    fields,
+                    _state: PhantomData,
+                })
+            }
             _ => Err(crate::core::error::LlmError::Builder(
                 "Unsupported Provider".to_string(),
             )),
