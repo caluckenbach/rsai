@@ -13,8 +13,7 @@ struct Analysis {
     confidence: f32,
 }
 
-let analysis = llm::call()
-    .provider("openai")?
+let analysis = llm::with("openai")?
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
@@ -30,6 +29,7 @@ let analysis = llm::call()
 Get AI responses that conform to your exact Rust types - no JSON parsing required!
 
 The `#[completion_schema]` macro automatically adds the necessary derives and attributes for structured output:
+
 - `#[derive(serde::Deserialize, schemars::JsonSchema)]`
 - `#[schemars(deny_unknown_fields)]`
 
@@ -43,8 +43,7 @@ struct MovieReview {
     summary: String,
 }
 
-let review = llm::call()
-    .provider("openai")?
+let review = llm::with("openai")?
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
@@ -66,8 +65,7 @@ enum Priority {
     Critical,
 }
 
-let priority = llm::call()
-    .provider("openai")?
+let priority = llm::with("openai")?
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
@@ -89,8 +87,7 @@ enum TaskStatus {
     Blocked { reason: String },
 }
 
-let status = llm::call()
-    .provider("openai")?
+let status = llm::with("openai")?
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
     .messages(vec![Message {
