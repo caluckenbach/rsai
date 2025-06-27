@@ -111,10 +111,6 @@ impl<State> LlmBuilder<State> {
         self.fields.model.as_deref()
     }
 
-    pub(crate) fn set_api_key(&mut self, api_key: &str) {
-        self.fields.api_key = Some(api_key.to_string());
-    }
-
     pub(crate) fn get_api_key(&self) -> Option<&str> {
         self.fields.api_key.as_deref()
     }

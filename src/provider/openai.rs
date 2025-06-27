@@ -111,7 +111,11 @@ impl OpenAiClient {
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
         let mut openai_input = convert_messages_to_openai_format(request.messages.clone())?;
-        let is_parallel = request.parallel_tool_calls.unwrap_or(true);
+        let is_parallel = request
+            .tool_config
+            .as_ref()
+            .and_then(|tc| tc.parallel_tool_calls)
+            .unwrap_or(true);
 
         loop {
             let openai_request = self.build_openai_request::<T>(&request, &openai_input)?;
@@ -142,22 +146,48 @@ impl OpenAiClient {
     where
         T: schemars::JsonSchema,
     {
-        Ok(OpenAiStructuredRequest {
+        let mut req = OpenAiStructuredRequest {
             model: request.model.clone(),
             input: openai_input.to_vec(),
             text: create_format_for_type::<T>()?,
-            tools: request.tools.as_ref().map(|tools| {
+            // Default fields
+            parallel_tool_calls: None,
+            temperature: None,
+            tools: None,
+            tool_choice: None,
+            instructions: None,
+            max_output_tokens: None,
+            max_tool_calls: None,
+            store: None,
+            top_logprobs: None,
+            top_p: None,
+            truncation: None,
+            user: None,
+        };
+
+        // Apply tool configuration if present
+        if let Some(tool_config) = &request.tool_config {
+            req.tools = tool_config.tools.as_ref().map(|tools| {
                 tools
                     .iter()
                     .map(create_function_tool)
                     .collect::<Box<[Tool]>>()
-            }),
-            tool_choice: request
+            });
+            req.tool_choice = tool_config
                 .tool_choice
                 .as_ref()
-                .map(|tc| create_function_tool_choice(tc.clone())),
-            parallel_tool_calls: request.parallel_tool_calls,
-        })
+                .map(|tc| create_function_tool_choice(tc.clone()));
+            req.parallel_tool_calls = tool_config.parallel_tool_calls;
+        }
+
+        // Apply generation configuration if present
+        if let Some(gen_config) = &request.generation_config {
+            req.temperature = gen_config.temperature;
+            req.max_output_tokens = gen_config.max_tokens;
+            req.top_p = gen_config.top_p;
+        }
+
+        Ok(req)
     }
 
     /// Extract function calls from API response
@@ -290,7 +320,13 @@ impl LlmProvider for OpenAiClient {
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
         // If tools are present and we have a registry, handle automatic tool calling
-        if request.tools.is_some() && tool_registry.is_some() {
+        let has_tools = request
+            .tool_config
+            .as_ref()
+            .and_then(|tc| tc.tools.as_ref())
+            .is_some();
+
+        if has_tools && tool_registry.is_some() {
             return self
                 .handle_tool_calling_loop(request, tool_registry.unwrap())
                 .await;
@@ -306,17 +342,48 @@ impl LlmProvider for OpenAiClient {
 #[derive(Debug, Serialize)]
 struct OpenAiStructuredRequest {
     model: String,
-    input: Vec<InputItem>,
-    text: Format,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     parallel_tool_calls: Option<bool>,
+
+    input: Vec<InputItem>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instructions: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_output_tokens: Option<u32>,
+
+    /// Maximum number of total calls to built-in tools
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_tool_calls: Option<u32>,
+
+    store: Option<bool>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+
+    text: Format,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     tool_choice: Option<ToolChoice>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     tools: Option<Box<[Tool]>>,
+
+    /// An integer between 0 and 20
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_logprobs: Option<u32>,
+
+    /// Alter this or temperature but not both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+
+    truncation: Option<bool>,
+
+    /// Used to boost cache hit rates by better bucketing similar requests
+    #[serde(skip_serializing_if = "Option::is_none")]
+    user: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -534,7 +601,7 @@ struct OutputText {
 
 #[derive(Debug, Deserialize)]
 struct Refusal {
-    /// The refusal explanationfrom the model.
+    /// The refusal explanation from the model.
     refusal: String,
 
     #[allow(dead_code)]
@@ -585,26 +652,45 @@ where
     let input = convert_messages_to_openai_format(req.messages)?;
     let text = create_format_for_type::<T>()?;
 
-    let tools = if let Some(req_tools) = req.tools {
-        let tools = req_tools
-            .iter()
-            .map(create_function_tool)
-            .collect::<Box<[Tool]>>();
-        Some(tools)
-    } else {
-        None
-    };
-
-    let tool_choice = req.tool_choice.map(create_function_tool_choice);
-
-    Ok(OpenAiStructuredRequest {
+    let mut openai_req = OpenAiStructuredRequest {
         model: req.model,
         input,
         text,
-        tools,
-        tool_choice,
-        parallel_tool_calls: req.parallel_tool_calls,
-    })
+        // Default fields
+        parallel_tool_calls: None,
+        temperature: None,
+        tools: None,
+        tool_choice: None,
+        instructions: None,
+        max_output_tokens: None,
+        max_tool_calls: None,
+        store: None,
+        top_logprobs: None,
+        top_p: None,
+        truncation: None,
+        user: None,
+    };
+
+    // Apply tool configuration if present
+    if let Some(tool_config) = req.tool_config {
+        openai_req.tools = tool_config.tools.map(|tools| {
+            tools
+                .iter()
+                .map(create_function_tool)
+                .collect::<Box<[Tool]>>()
+        });
+        openai_req.tool_choice = tool_config.tool_choice.map(create_function_tool_choice);
+        openai_req.parallel_tool_calls = tool_config.parallel_tool_calls;
+    }
+
+    // Apply generation configuration if present
+    if let Some(gen_config) = req.generation_config {
+        openai_req.temperature = gen_config.temperature;
+        openai_req.max_output_tokens = gen_config.max_tokens;
+        openai_req.top_p = gen_config.top_p;
+    }
+
+    Ok(openai_req)
 }
 
 fn create_core_structured_response<T>(
