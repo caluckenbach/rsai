@@ -110,125 +110,171 @@ impl OpenAiClient {
     where
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
-        // Convert initial request to OpenAI format once
-        let mut openai_input = convert_messages_to_openai_format(request.messages)?;
+        let mut openai_input = convert_messages_to_openai_format(request.messages.clone())?;
+        let is_parallel = request.parallel_tool_calls.unwrap_or(true);
 
         loop {
-            let openai_request = OpenAiStructuredRequest {
-                model: request.model.clone(),
-                input: openai_input.clone(),
-                text: create_format_for_type::<T>()?,
-                tools: request.tools.as_ref().map(|tools| {
-                    tools
-                        .iter()
-                        .map(create_function_tool)
-                        .collect::<Box<[Tool]>>()
-                }),
-                tool_choice: request
-                    .tool_choice
-                    .as_ref()
-                    .map(|tc| create_function_tool_choice(tc.clone())),
-                parallel_tool_calls: request.parallel_tool_calls,
-            };
-
+            let openai_request = self.build_openai_request::<T>(&request, &openai_input)?;
             let api_response = self.make_api_request(openai_request).await?;
 
-            // Check if response contains function calls
-            let function_calls: Vec<&FunctionToolCall> = api_response
-                .output
-                .iter()
-                .filter_map(|output| match output {
-                    OutputContent::FunctionCall(fc) => Some(fc),
-                    OutputContent::OutputMessage(_) => None,
-                })
-                .collect();
+            let function_calls = self.extract_function_calls(&api_response);
 
             if function_calls.is_empty() {
-                // No more tool calls, return the structured response
                 return create_core_structured_response(api_response);
             }
 
-            // Handle tool calls based on whether parallel execution is enabled
-            let is_parallel = request.parallel_tool_calls.unwrap_or(true);
+            self.process_function_calls(
+                &function_calls,
+                &mut openai_input,
+                tool_registry,
+                is_parallel,
+            )
+            .await?;
+        }
+    }
 
-            if is_parallel && function_calls.len() > 1 {
-                // For parallel tool calls: add all tool calls first, then all results
-                let mut pending_executions = Vec::new();
+    /// Build OpenAI structured request from core request and input
+    fn build_openai_request<T>(
+        &self,
+        request: &StructuredRequest,
+        openai_input: &[InputItem],
+    ) -> Result<OpenAiStructuredRequest, LlmError>
+    where
+        T: schemars::JsonSchema,
+    {
+        Ok(OpenAiStructuredRequest {
+            model: request.model.clone(),
+            input: openai_input.to_vec(),
+            text: create_format_for_type::<T>()?,
+            tools: request.tools.as_ref().map(|tools| {
+                tools
+                    .iter()
+                    .map(create_function_tool)
+                    .collect::<Box<[Tool]>>()
+            }),
+            tool_choice: request
+                .tool_choice
+                .as_ref()
+                .map(|tc| create_function_tool_choice(tc.clone())),
+            parallel_tool_calls: request.parallel_tool_calls,
+        })
+    }
 
-                // Add all function calls to the input
-                for function_call in &function_calls {
-                    openai_input.push(InputItem::FunctionCall((*function_call).clone()));
+    /// Extract function calls from API response
+    fn extract_function_calls<'a>(
+        &self,
+        api_response: &'a OpenAiStructuredResponse,
+    ) -> Vec<&'a FunctionToolCall> {
+        api_response
+            .output
+            .iter()
+            .filter_map(|output| match output {
+                OutputContent::FunctionCall(fc) => Some(fc),
+                OutputContent::OutputMessage(_) => None,
+            })
+            .collect()
+    }
 
-                    // Parse arguments for execution
-                    let arguments = match &function_call.arguments {
-                        serde_json::Value::String(s) => {
-                            serde_json::from_str(s).map_err(|e| LlmError::Parse {
-                                message: format!("Failed to parse tool arguments: {s}"),
-                                source: Box::new(e),
-                            })?
-                        }
-                        other => other.clone(),
-                    };
+    /// Process function calls either in parallel or sequentially
+    async fn process_function_calls(
+        &self,
+        function_calls: &[&FunctionToolCall],
+        openai_input: &mut Vec<InputItem>,
+        tool_registry: &ToolRegistry,
+        is_parallel: bool,
+    ) -> Result<(), LlmError> {
+        if is_parallel && function_calls.len() > 1 {
+            self.process_parallel_function_calls(function_calls, openai_input, tool_registry)
+                .await
+        } else {
+            self.process_sequential_function_calls(function_calls, openai_input, tool_registry)
+                .await
+        }
+    }
 
-                    pending_executions.push((
-                        function_call.id.clone(),
-                        function_call.call_id.clone(),
-                        function_call.name.clone(),
-                        arguments,
-                    ));
-                }
+    /// Process function calls in parallel (all calls first, then all results)
+    async fn process_parallel_function_calls(
+        &self,
+        function_calls: &[&FunctionToolCall],
+        openai_input: &mut Vec<InputItem>,
+        tool_registry: &ToolRegistry,
+    ) -> Result<(), LlmError> {
+        let mut pending_executions = Vec::new();
 
-                // Execute all tools and add their results
-                for (id, call_id, name, arguments) in pending_executions {
-                    let tool_call = ToolCall {
-                        id: id.clone(),
-                        call_id: call_id.clone(),
-                        name,
-                        arguments,
-                    };
+        // Add all function calls to input and prepare for execution
+        for function_call in function_calls {
+            openai_input.push(InputItem::FunctionCall((*function_call).clone()));
 
-                    let result = tool_registry.execute(&tool_call).await?;
+            let arguments = self.parse_function_arguments(&function_call.arguments)?;
+            pending_executions.push((
+                function_call.id.clone(),
+                function_call.call_id.clone(),
+                function_call.name.clone(),
+                arguments,
+            ));
+        }
 
-                    openai_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
-                        call_id,
-                        output: serde_json::Value::String(result),
-                        r#type: "function_call_output".to_string(),
-                    }));
-                }
-            } else {
-                // For sequential tool calls: add tool call and result pairs one by one
-                for function_call in function_calls {
-                    // Add the function call
-                    openai_input.push(InputItem::FunctionCall((*function_call).clone()));
+        // Execute all tools and add their results
+        for (id, call_id, name, arguments) in pending_executions {
+            let tool_call = ToolCall {
+                id,
+                call_id: call_id.clone(),
+                name,
+                arguments,
+            };
+            let result = tool_registry.execute(&tool_call).await?;
 
-                    // Parse arguments for execution
-                    let arguments = match &function_call.arguments {
-                        serde_json::Value::String(s) => {
-                            serde_json::from_str(s).map_err(|e| LlmError::Parse {
-                                message: format!("Failed to parse tool arguments: {s}"),
-                                source: Box::new(e),
-                            })?
-                        }
-                        other => other.clone(),
-                    };
+            openai_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
+                call_id,
+                output: serde_json::Value::String(result),
+                r#type: "function_call_output".to_string(),
+            }));
+        }
 
-                    let tool_call = ToolCall {
-                        id: function_call.id.clone(),
-                        call_id: function_call.call_id.clone(),
-                        name: function_call.name.clone(),
-                        arguments,
-                    };
+        Ok(())
+    }
 
-                    // Execute tool and add result immediately
-                    let result = tool_registry.execute(&tool_call).await?;
+    /// Process function calls sequentially (call and result pairs)
+    async fn process_sequential_function_calls(
+        &self,
+        function_calls: &[&FunctionToolCall],
+        openai_input: &mut Vec<InputItem>,
+        tool_registry: &ToolRegistry,
+    ) -> Result<(), LlmError> {
+        for function_call in function_calls {
+            openai_input.push(InputItem::FunctionCall((*function_call).clone()));
 
-                    openai_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
-                        call_id: function_call.call_id.clone(),
-                        output: serde_json::Value::String(result),
-                        r#type: "function_call_output".to_string(),
-                    }));
-                }
-            }
+            let arguments = self.parse_function_arguments(&function_call.arguments)?;
+            let tool_call = ToolCall {
+                id: function_call.id.clone(),
+                call_id: function_call.call_id.clone(),
+                name: function_call.name.clone(),
+                arguments,
+            };
+
+            let result = tool_registry.execute(&tool_call).await?;
+
+            openai_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
+                call_id: function_call.call_id.clone(),
+                output: serde_json::Value::String(result),
+                r#type: "function_call_output".to_string(),
+            }));
+        }
+
+        Ok(())
+    }
+
+    /// Parse function arguments from JSON value
+    fn parse_function_arguments(
+        &self,
+        arguments: &serde_json::Value,
+    ) -> Result<serde_json::Value, LlmError> {
+        match arguments {
+            serde_json::Value::String(s) => serde_json::from_str(s).map_err(|e| LlmError::Parse {
+                message: format!("Failed to parse tool arguments: {s}"),
+                source: Box::new(e),
+            }),
+            other => Ok(other.clone()),
         }
     }
 }
