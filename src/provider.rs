@@ -1,3 +1,4 @@
+mod constants;
 pub mod openai;
 
 #[derive(Debug, Clone, PartialEq)]

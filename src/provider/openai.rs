@@ -15,6 +15,7 @@ use crate::core::{
     self,
     types::{ConversationMessage, StructuredRequest, StructuredResponse, ToolCall, ToolRegistry},
 };
+use crate::provider::constants::openai;
 use async_trait::async_trait;
 use schemars::schema_for;
 use serde::{Deserialize, Serialize};
@@ -42,9 +43,9 @@ impl OpenAiClient {
     pub fn new(api_key: String) -> Self {
         Self {
             api_key,
-            base_url: "https://api.openai.com/v1".to_string(),
+            base_url: openai::API_BASE.to_string(),
             client: reqwest::Client::new(),
-            default_model: "gpt-4.1".to_string(),
+            default_model: openai::DEFAULT_MODEL.to_string(),
         }
     }
 
@@ -62,7 +63,7 @@ impl OpenAiClient {
         &self,
         request: OpenAiStructuredRequest,
     ) -> Result<OpenAiStructuredResponse, LlmError> {
-        let url = format!("{}/responses", self.base_url);
+        let url = format!("{}{}", self.base_url, openai::RESPONSES_ENDPOINT);
 
         let res = self
             .client
@@ -686,7 +687,10 @@ fn convert_messages_to_openai_format(
                     call_id: tc.call_id,
                     name: tc.name,
                     arguments: serde_json::Value::String(
-                        serde_json::to_string(&tc.arguments).unwrap_or_default(),
+                        serde_json::to_string(&tc.arguments).map_err(|e| LlmError::Parse {
+                            message: "Failed to serialize tool call arguments".to_string(),
+                            source: Box::new(e),
+                        })?,
                     ),
                 }))
             }
