@@ -138,3 +138,9 @@ impl ToolSet {
         self.registry.get_schemas()
     }
 }
+
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}

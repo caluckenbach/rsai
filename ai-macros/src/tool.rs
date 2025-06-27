@@ -41,7 +41,7 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     let is_async = input.sig.asyncness.is_some();
 
     // Generate the execution code
-    let execute_impl = generate_execute_impl(&fn_name, &params, is_async)?;
+    let execute_impl = generate_execute_impl(fn_name, &params, is_async)?;
 
     // Generate the complete implementation
     let expanded = quote! {

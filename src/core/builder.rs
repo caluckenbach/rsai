@@ -201,7 +201,7 @@ impl<State: private::Completable> LlmBuilder<State> {
 
                 let conversation_messages: Vec<ConversationMessage> = messages
                     .into_iter()
-                    .map(|msg| ConversationMessage::Chat(msg))
+                    .map(ConversationMessage::Chat)
                     .collect();
 
                 let req = StructuredRequest {

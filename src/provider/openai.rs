@@ -1,3 +1,16 @@
+//! OpenAI provider implementation.
+//!
+//! # API Compatibility
+//!
+//! This module preserves all fields from the OpenAI API responses, even those not currently used.
+//! Fields marked with `#[allow(dead_code)]` are retained for:
+//! - API contract completeness
+//! - Future compatibility without breaking changes
+//! - Debugging and logging purposes
+//!
+//! When adding new API structs, include all fields from the OpenAI documentation and mark
+//! unused ones with `#[allow(dead_code)]` rather than omitting them.
+
 use crate::core::{
     self,
     types::{ConversationMessage, StructuredRequest, StructuredResponse, ToolCall, ToolRegistry},
@@ -277,20 +290,21 @@ enum ToolMode {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 enum ToolChoiceDefinite {
-    Hosted(HostedToolChoice),
+    // TODO
+    // Hosted(HostedToolChoice),
     Function(FunctionToolChoice),
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum HostedToolChoice {
-    // FileSearch,
-    // WebSearchPreview,
-    // ComputerUsePreview,
-    // CodeInterpreter,
-    // Mcp,
-    // ImageGeneration,
-}
+// #[derive(Debug, Serialize)]
+// #[serde(rename_all = "snake_case")]
+// enum HostedToolChoice {
+//     // FileSearch,
+//     // WebSearchPreview,
+//     // ComputerUsePreview,
+//     // CodeInterpreter,
+//     // Mcp,
+//     // ImageGeneration,
+// }
 
 #[derive(Debug, Serialize)]
 /// Use this option to force the model to call a specific function.
@@ -339,6 +353,8 @@ struct Format {
 #[derive(Debug, Serialize)]
 #[serde(untagged, rename_all = "snake_case")]
 enum FormatType {
+    // TODO: remove this, once text input is supported
+    #[allow(dead_code)]
     Text {
         #[serde(rename = "type")]
         r#type: TextType,
@@ -349,6 +365,8 @@ enum FormatType {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "snake_case")]
 enum TextType {
+    // TODO: Remove this, once text input is supported
+    #[allow(dead_code)]
     Text,
 }
 
@@ -401,14 +419,17 @@ struct OpenAiStructuredResponse {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum OutputContent {
-    OutputMessage(Message),
+    OutputMessage(OutputMessage),
     FunctionCall(FunctionToolCall),
 }
 
+// TODO: Remove this, once text input is supported
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-struct Message {
+struct OutputMessage {
     id: String,
 
+    #[allow(dead_code)]
     /// This is always `message`
     #[serde(rename = "type")]
     r#type: String,
@@ -454,6 +475,7 @@ enum MessageContent {
 
 #[derive(Debug, Deserialize)]
 struct OutputText {
+    #[allow(dead_code)]
     /// Always `output_text`
     #[serde(rename = "type")]
     r#type: String,
@@ -468,6 +490,7 @@ struct Refusal {
     /// The refusal explanationfrom the model.
     refusal: String,
 
+    #[allow(dead_code)]
     /// Always `refusal`
     #[serde(rename = "type")]
     r#type: String,
@@ -525,11 +548,7 @@ where
         None
     };
 
-    let tool_choice = if let Some(req_tool_choice) = req.tool_choice {
-        Some(create_function_tool_choice(req_tool_choice))
-    } else {
-        None
-    };
+    let tool_choice = req.tool_choice.map(create_function_tool_choice);
 
     Ok(OpenAiStructuredRequest {
         model: req.model,
@@ -572,10 +591,10 @@ where
 
             // Try to parse as wrapped value first, then fall back to direct parsing
             let parsed_content: T =
-                if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
+                if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(text) {
                     wrapped.value
                 } else {
-                    serde_json::from_str(&text).map_err(|e| LlmError::Parse {
+                    serde_json::from_str(text).map_err(|e| LlmError::Parse {
                         message: "Failed to parse structured output".to_string(),
                         source: Box::new(e),
                     })?
