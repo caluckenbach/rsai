@@ -31,3 +31,7 @@ path = "examples/structured-generation/main.rs"
 [[example]]
 name = "function-calling"
 path = "examples/function-calling/main.rs"
+
+[[example]]
+name = "generation-config"
+path = "examples/generation-config/main.rs"
