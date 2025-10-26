@@ -107,10 +107,6 @@ impl<State> LlmBuilder<State> {
         }
     }
 
-    pub(crate) fn get_model(&self) -> Option<&str> {
-        self.fields.model.as_deref()
-    }
-
     pub(crate) fn get_api_key(&self) -> Option<&str> {
         self.fields.api_key.as_deref()
     }
