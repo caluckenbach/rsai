@@ -2,7 +2,7 @@ use std::{env, marker::PhantomData};
 
 use serde::de::Deserialize;
 
-use crate::provider::{Provider, openai};
+use crate::provider::{Provider, openai, openrouter};
 
 use super::{
     error::LlmError,
@@ -244,6 +244,31 @@ impl<State: private::Completable> LlmBuilder<State> {
                     }),
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
+                client
+                    .generate_structured(req, self.fields.tool_registry.as_ref())
+                    .await
+            }
+            Provider::OpenRouter => {
+                let conversation_messages: Vec<ConversationMessage> = messages
+                    .into_iter()
+                    .map(ConversationMessage::Chat)
+                    .collect();
+
+                let req = StructuredRequest {
+                    model: model_string,
+                    messages: conversation_messages,
+                    tool_config: Some(ToolConfig {
+                        tools: self.fields.tools.clone(),
+                        tool_choice: self.fields.tool_choice.clone(),
+                        parallel_tool_calls: self.fields.parallel_tool_calls,
+                    }),
+                    generation_config: Some(GenerationConfig {
+                        max_tokens: self.fields.max_tokens,
+                        temperature: self.fields.temperature,
+                        top_p: self.fields.top_p,
+                    }),
+                };
+                let client = openrouter::create_openrouter_client_from_builder(&self)?;
                 client
                     .generate_structured(req, self.fields.tool_registry.as_ref())
                     .await

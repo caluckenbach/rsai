@@ -35,3 +35,7 @@ path = "examples/function-calling/main.rs"
 [[example]]
 name = "generation-config"
 path = "examples/generation-config/main.rs"
+
+[[example]]
+name = "openrouter"
+path = "examples/openrouter/main.rs"

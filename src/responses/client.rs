@@ -41,9 +41,6 @@ pub trait ResponsesProviderConfig {
     /// Authentication header as (header_name, header_value) tuple
     fn auth_header(&self) -> (String, String);
 
-    /// Default model to use if none specified
-    fn default_model(&self) -> &str;
-
     /// Additional headers to include with each request
     fn extra_headers(&self) -> Vec<(String, String)> {
         Vec::new()

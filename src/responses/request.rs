@@ -94,14 +94,6 @@ pub enum InputItem {
     FunctionCallOutput(FunctionToolCallOutput),
 }
 
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum ToolChoiceDefinite {
-    // TODO
-    // Hosted(HostedToolChoice),
-    Function(FunctionToolChoice),
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolChoice {
     None,
