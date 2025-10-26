@@ -79,14 +79,12 @@ fn extract_doc_comment_and_params(
     let doc_strings: Vec<String> = attrs
         .iter()
         .filter_map(|attr| {
-            if attr.path().is_ident("doc") {
-                if let syn::Meta::NameValue(meta) = &attr.meta {
-                    if let syn::Expr::Lit(expr_lit) = &meta.value {
-                        if let syn::Lit::Str(lit_str) = &expr_lit.lit {
-                            return Some(lit_str.value().trim().to_string());
-                        }
-                    }
-                }
+            if attr.path().is_ident("doc")
+                && let syn::Meta::NameValue(meta) = &attr.meta
+                && let syn::Expr::Lit(expr_lit) = &meta.value
+                && let syn::Lit::Str(lit_str) = &expr_lit.lit
+            {
+                return Some(lit_str.value().trim().to_string());
             }
             None
         })
