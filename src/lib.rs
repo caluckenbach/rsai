@@ -1,5 +1,6 @@
 pub mod core;
 pub mod provider;
+pub mod responses;
 
 pub use core::builder::ApiKey;
 pub use core::{
