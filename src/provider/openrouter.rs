@@ -150,10 +150,10 @@ impl LlmProvider for OpenRouterClient {
             .and_then(|tc| tc.tools.as_ref())
             .is_some();
 
-        if has_tools && tool_registry.is_some() {
+        if has_tools && let Some(tool_registry) = tool_registry {
             return self
                 .responses_client
-                .handle_tool_calling_loop(request, tool_registry.unwrap())
+                .handle_tool_calling_loop(request, tool_registry)
                 .await;
         }
 

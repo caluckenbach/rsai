@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::responses::types::FunctionToolCall;
 
@@ -41,12 +41,6 @@ pub struct OutputMessage {
 
     /// This is always `assistant`
     pub role: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum FunctionToolCallOutputType {
-    FunctionCallOutput,
 }
 
 #[derive(Debug, Deserialize, Clone)]
