@@ -11,14 +11,26 @@
 //! When adding new API structs, include all fields from the OpenAI documentation and mark
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
-use crate::core::{
-    self,
-    types::{ConversationMessage, StructuredRequest, StructuredResponse, ToolCall, ToolRegistry},
-};
 use crate::provider::constants::openai;
+use crate::responses::common::FunctionToolCall;
+// I did not qualify these imports as responses::<type> because they migth be reused for completions as well.
+use crate::responses::{
+    Format, FormatType, FunctionToolCallOutput, InputItem, InputMessage, InputMessageRole,
+    JsonSchema, JsonSchemaType, MessageContent, OutputContent, Tool,
+};
+use crate::{
+    core::{
+        self,
+        types::{
+            ConversationMessage, StructuredRequest, StructuredResponse, ToolCall, ToolRegistry,
+        },
+    },
+    responses,
+};
+
 use async_trait::async_trait;
 use schemars::schema_for;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// Wrapper for non-object JSON Schema types (enums, strings, numbers, etc.)
 /// OpenAI's structured output API requires the root schema to be an object,
@@ -61,8 +73,8 @@ impl OpenAiClient {
 
     async fn make_api_request(
         &self,
-        request: OpenAiStructuredRequest,
-    ) -> Result<OpenAiStructuredResponse, LlmError> {
+        request: responses::Request,
+    ) -> Result<responses::Response, LlmError> {
         let url = format!("{}{}", self.base_url, openai::RESPONSES_ENDPOINT);
 
         let res = self
@@ -141,12 +153,12 @@ impl OpenAiClient {
     fn build_openai_request<T>(
         &self,
         request: &StructuredRequest,
-        openai_input: &[InputItem],
-    ) -> Result<OpenAiStructuredRequest, LlmError>
+        openai_input: &[responses::InputItem],
+    ) -> Result<responses::Request, LlmError>
     where
         T: schemars::JsonSchema,
     {
-        let mut req = OpenAiStructuredRequest {
+        let mut req = responses::Request {
             model: request.model.clone(),
             input: openai_input.to_vec(),
             text: create_format_for_type::<T>()?,
@@ -173,10 +185,7 @@ impl OpenAiClient {
                     .map(create_function_tool)
                     .collect::<Box<[Tool]>>()
             });
-            req.tool_choice = tool_config
-                .tool_choice
-                .as_ref()
-                .map(|tc| create_function_tool_choice(tc.clone()));
+            req.tool_choice = tool_config.tool_choice.as_ref().map(|tc| tc.clone().into());
             req.parallel_tool_calls = tool_config.parallel_tool_calls;
         }
 
@@ -193,7 +202,7 @@ impl OpenAiClient {
     /// Extract function calls from API response
     fn extract_function_calls<'a>(
         &self,
-        api_response: &'a OpenAiStructuredResponse,
+        api_response: &'a responses::Response,
     ) -> Vec<&'a FunctionToolCall> {
         api_response
             .output
@@ -339,292 +348,6 @@ impl LlmProvider for OpenAiClient {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct OpenAiStructuredRequest {
-    model: String,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parallel_tool_calls: Option<bool>,
-
-    input: Vec<InputItem>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    instructions: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_output_tokens: Option<u32>,
-
-    /// Maximum number of total calls to built-in tools
-    #[serde(skip_serializing_if = "Option::is_none")]
-    max_tool_calls: Option<u32>,
-
-    store: Option<bool>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    temperature: Option<f32>,
-
-    text: Format,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tool_choice: Option<ToolChoice>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
-    tools: Option<Box<[Tool]>>,
-
-    /// An integer between 0 and 20
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_logprobs: Option<u32>,
-
-    /// Alter this or temperature but not both.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    top_p: Option<f32>,
-
-    truncation: Option<bool>,
-
-    /// Used to boost cache hit rates by better bucketing similar requests
-    #[serde(skip_serializing_if = "Option::is_none")]
-    user: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum ToolChoice {
-    Mode(ToolMode),
-    Definite(ToolChoiceDefinite),
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum ToolMode {
-    None,
-    Auto,
-    Required,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum ToolChoiceDefinite {
-    // TODO
-    // Hosted(HostedToolChoice),
-    Function(FunctionToolChoice),
-}
-
-// #[derive(Debug, Serialize)]
-// #[serde(rename_all = "snake_case")]
-// enum HostedToolChoice {
-//     // FileSearch,
-//     // WebSearchPreview,
-//     // ComputerUsePreview,
-//     // CodeInterpreter,
-//     // Mcp,
-//     // ImageGeneration,
-// }
-
-#[derive(Debug, Serialize)]
-/// Use this option to force the model to call a specific function.
-struct FunctionToolChoice {
-    /// The name of the function to call.
-    name: String,
-
-    #[serde(rename = "type")]
-    r#type: FunctionType,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-enum Tool {
-    Function(FunctionTool),
-    // TODO: Add file search tool
-    // TODO: Add web search tool
-    // TODO: Add computer use tool
-    // TODO: Add MCP Tool
-    // TODO: Add code interpreter tool
-    // TODO: Add image generation tool
-    // TODO: Add local shell tool
-}
-
-#[derive(Debug, Serialize)]
-struct FunctionTool {
-    name: String,
-    parameters: serde_json::Value,
-    strict: bool,
-    #[serde(rename = "type")]
-    r#type: FunctionType,
-    description: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum FunctionType {
-    Function,
-}
-
-#[derive(Debug, Serialize)]
-struct Format {
-    format: FormatType,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged, rename_all = "snake_case")]
-enum FormatType {
-    // TODO: remove this, once text input is supported
-    #[allow(dead_code)]
-    Text {
-        #[serde(rename = "type")]
-        r#type: TextType,
-    },
-    JsonSchema(JsonSchema),
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum TextType {
-    // TODO: Remove this, once text input is supported
-    #[allow(dead_code)]
-    Text,
-}
-
-#[derive(Debug, Serialize)]
-struct JsonSchema {
-    name: String,
-
-    schema: serde_json::Value,
-
-    #[serde(rename = "type")]
-    r#type: JsonSchemaType,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum JsonSchemaType {
-    JsonSchema,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "snake_case")]
-enum InputMessageRole {
-    System,
-    User,
-    Assistant,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(untagged)]
-enum InputItem {
-    Message(InputMessage),
-    FunctionCall(FunctionToolCall),
-    FunctionCallOutput(FunctionToolCallOutput),
-}
-
-#[derive(Debug, Serialize, Clone)]
-struct InputMessage {
-    role: InputMessageRole,
-    content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct OpenAiStructuredResponse {
-    id: String,
-    model: String,
-    output: Vec<OutputContent>,
-    usage: Usage,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum OutputContent {
-    OutputMessage(OutputMessage),
-    FunctionCall(FunctionToolCall),
-}
-
-// TODO: Remove this, once text input is supported
-#[allow(dead_code)]
-#[derive(Debug, Deserialize)]
-struct OutputMessage {
-    id: String,
-
-    #[allow(dead_code)]
-    /// This is always `message`
-    #[serde(rename = "type")]
-    r#type: String,
-
-    status: Status,
-
-    content: Vec<MessageContent>,
-
-    /// This is always `assistant`
-    role: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct FunctionToolCall {
-    #[serde(rename = "type")]
-    r#type: String,
-    id: String,
-    call_id: String,
-    name: String,
-    arguments: serde_json::Value,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct FunctionToolCallOutput {
-    call_id: String,
-    output: serde_json::Value,
-    #[serde(rename = "type")]
-    r#type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum FunctionToolCallOutputType {
-    FunctionCallOutput,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged, rename_all = "snake_case")]
-enum MessageContent {
-    OutputText(OutputText),
-    Refusal(Refusal),
-}
-
-#[derive(Debug, Deserialize)]
-struct OutputText {
-    #[allow(dead_code)]
-    /// Always `output_text`
-    #[serde(rename = "type")]
-    r#type: String,
-
-    text: String,
-    // TODO
-    // annotations
-}
-
-#[derive(Debug, Deserialize)]
-struct Refusal {
-    /// The refusal explanation from the model.
-    refusal: String,
-
-    #[allow(dead_code)]
-    /// Always `refusal`
-    #[serde(rename = "type")]
-    r#type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
-enum Status {
-    InProgress,
-    Completed,
-    Incomplete,
-}
-
-#[derive(Debug, Deserialize)]
-struct Usage {
-    input_tokens: i32,
-    output_tokens: i32,
-    total_tokens: i32,
-}
-
 pub fn create_openai_client_from_builder<State>(
     builder: &LlmBuilder<State>,
 ) -> Result<OpenAiClient, LlmError> {
@@ -645,14 +368,14 @@ pub fn create_openai_client_from_builder<State>(
 
 fn create_openai_structured_request<T>(
     req: StructuredRequest,
-) -> Result<OpenAiStructuredRequest, LlmError>
+) -> Result<responses::Request, LlmError>
 where
     T: schemars::JsonSchema,
 {
     let input = convert_messages_to_openai_format(req.messages)?;
     let text = create_format_for_type::<T>()?;
 
-    let mut openai_req = OpenAiStructuredRequest {
+    let mut openai_req = responses::Request {
         model: req.model,
         input,
         text,
@@ -679,7 +402,7 @@ where
                 .map(create_function_tool)
                 .collect::<Box<[Tool]>>()
         });
-        openai_req.tool_choice = tool_config.tool_choice.map(create_function_tool_choice);
+        openai_req.tool_choice = tool_config.tool_choice.map(Into::into);
         openai_req.parallel_tool_calls = tool_config.parallel_tool_calls;
     }
 
@@ -694,7 +417,7 @@ where
 }
 
 fn create_core_structured_response<T>(
-    res: OpenAiStructuredResponse,
+    res: responses::Response,
 ) -> Result<StructuredResponse<T>, LlmError>
 where
     T: serde::de::DeserializeOwned,
@@ -775,26 +498,11 @@ fn create_function_tool(tool: &core::types::Tool) -> Tool {
         }
     }
 
-    Tool::Function(FunctionTool {
+    Tool {
         name: tool.name.clone(),
         parameters,
-        strict,
-        r#type: FunctionType::Function,
+        strict: Some(strict),
         description: tool.description.clone(),
-    })
-}
-
-fn create_function_tool_choice(tool_choice: core::types::ToolChoice) -> ToolChoice {
-    match tool_choice {
-        core::types::ToolChoice::None => ToolChoice::Mode(ToolMode::None),
-        core::types::ToolChoice::Auto => ToolChoice::Mode(ToolMode::Auto),
-        core::types::ToolChoice::Required => ToolChoice::Mode(ToolMode::Required),
-        core::types::ToolChoice::Function { name } => {
-            ToolChoice::Definite(ToolChoiceDefinite::Function(FunctionToolChoice {
-                name,
-                r#type: FunctionType::Function,
-            }))
-        }
     }
 }
 
