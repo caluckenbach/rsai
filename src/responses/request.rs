@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{core::types, responses::common::FunctionToolCall};
+use crate::{core::types, responses::types::FunctionToolCall};
 
 #[derive(Debug, Serialize)]
 pub struct Request {
@@ -30,9 +30,11 @@ pub struct Request {
     pub text: Format,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_tool_choice")]
     pub tool_choice: Option<ToolChoice>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(serialize_with = "serialize_tools")]
     pub tools: Option<Box<[Tool]>>,
 
     /// An integer between 0 and 20
@@ -50,6 +52,40 @@ pub struct Request {
     pub user: Option<String>,
 }
 
+/// Custom serializer for ToolChoice to match API format
+fn serialize_tool_choice<S>(
+    tool_choice: &Option<ToolChoice>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::Serialize;
+    match tool_choice {
+        Some(tc) => {
+            let serializable = create_tool_choice(tc.clone());
+            serializable.serialize(serializer)
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
+/// Custom serializer for Tools to match API format
+fn serialize_tools<S>(tools: &Option<Box<[Tool]>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::Serialize;
+    match tools {
+        Some(tools) => {
+            let serializable_tools: Vec<SerializableTool> =
+                tools.iter().map(create_serializable_tool).collect();
+            serializable_tools.serialize(serializer)
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
 #[derive(Debug, Serialize, Clone)]
 #[serde(untagged)]
 pub enum InputItem {
@@ -58,7 +94,15 @@ pub enum InputItem {
     FunctionCallOutput(FunctionToolCallOutput),
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum ToolChoiceDefinite {
+    // TODO
+    // Hosted(HostedToolChoice),
+    Function(FunctionToolChoice),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum ToolChoice {
     None,
     Auto,
@@ -77,12 +121,84 @@ impl From<types::ToolChoice> for ToolChoice {
     }
 }
 
-#[derive(Serialize, Debug, Clone, PartialEq)]
+/// Serialize ToolChoice to match API expectations
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum SerializableToolChoice {
+    Mode(ToolMode),
+    Definite(FunctionToolChoice),
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ToolMode {
+    None,
+    Auto,
+    Required,
+}
+
+#[derive(Debug, Serialize)]
+struct FunctionToolChoice {
+    name: String,
+    #[serde(rename = "type")]
+    r#type: FunctionType,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum FunctionType {
+    Function,
+}
+
+/// Convert core ToolChoice to serializable format for API
+fn create_tool_choice(tool_choice: ToolChoice) -> SerializableToolChoice {
+    match tool_choice {
+        ToolChoice::None => SerializableToolChoice::Mode(ToolMode::None),
+        ToolChoice::Auto => SerializableToolChoice::Mode(ToolMode::Auto),
+        ToolChoice::Required => SerializableToolChoice::Mode(ToolMode::Required),
+        ToolChoice::Function { name } => SerializableToolChoice::Definite(FunctionToolChoice {
+            name,
+            r#type: FunctionType::Function,
+        }),
+    }
+}
+
+/// Tool struct for internal use
+#[derive(Debug, Clone, PartialEq)]
 pub struct Tool {
     pub name: String,
     pub description: Option<String>,
     pub parameters: Value,
     pub strict: Option<bool>,
+}
+
+/// Serialize Tool to match API expectations with proper envelope
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+enum SerializableTool {
+    Function(FunctionTool),
+}
+
+#[derive(Debug, Serialize)]
+struct FunctionTool {
+    name: String,
+    parameters: Value,
+    strict: bool,
+    #[serde(rename = "type")]
+    r#type: FunctionType,
+    description: Option<String>,
+}
+
+/// Convert core Tool to serializable format for API
+fn create_serializable_tool(tool: &Tool) -> SerializableTool {
+    let strict = tool.strict.unwrap_or(true);
+    SerializableTool::Function(FunctionTool {
+        name: tool.name.clone(),
+        parameters: tool.parameters.clone(),
+        strict,
+        r#type: FunctionType::Function,
+        description: tool.description.clone(),
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -146,4 +262,67 @@ pub struct JsonSchema {
 #[serde(rename_all = "snake_case")]
 pub enum JsonSchemaType {
     JsonSchema,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json;
+
+    #[test]
+    fn test_tool_choice_serialization() {
+        // Test ToolChoice::None serializes to "none"
+        let tool_choice_none = ToolChoice::None;
+        let serialized = serde_json::to_string(&create_tool_choice(tool_choice_none)).unwrap();
+        assert_eq!(serialized, "\"none\"");
+
+        // Test ToolChoice::Auto serializes to "auto"
+        let tool_choice_auto = ToolChoice::Auto;
+        let serialized = serde_json::to_string(&create_tool_choice(tool_choice_auto)).unwrap();
+        assert_eq!(serialized, "\"auto\"");
+
+        // Test ToolChoice::Required serializes to "required"
+        let tool_choice_required = ToolChoice::Required;
+        let serialized = serde_json::to_string(&create_tool_choice(tool_choice_required)).unwrap();
+        assert_eq!(serialized, "\"required\"");
+
+        // Test ToolChoice::Function serializes to proper object shape
+        let tool_choice_function = ToolChoice::Function {
+            name: "test_function".to_string(),
+        };
+        let serialized = serde_json::to_string(&create_tool_choice(tool_choice_function)).unwrap();
+        let expected = r#"{"name":"test_function","type":"function"}"#;
+        assert_eq!(serialized, expected);
+    }
+
+    #[test]
+    fn test_tool_serialization() {
+        let tool = Tool {
+            name: "test_tool".to_string(),
+            description: Some("A test tool".to_string()),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "param1": { "type": "string" }
+                }
+            }),
+            strict: Some(true),
+        };
+
+        let serialized = serde_json::to_string(&create_serializable_tool(&tool)).unwrap();
+
+        // Should serialize with proper envelope: {"type":"function","function":{...}}
+        let parsed: serde_json::Value = serde_json::from_str(&serialized).unwrap();
+
+        // Check that it has the function wrapper
+        assert!(parsed.get("type").is_some());
+        assert_eq!(parsed["type"], "function");
+
+        // Check the inner function object
+        let function_obj = &parsed;
+        assert_eq!(function_obj["name"], "test_tool");
+        assert_eq!(function_obj["description"], "A test tool");
+        assert_eq!(function_obj["strict"], true);
+        assert!(function_obj["parameters"].is_object());
+    }
 }

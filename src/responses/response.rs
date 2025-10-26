@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::responses::common::FunctionToolCall;
+use crate::responses::types::FunctionToolCall;
 
 #[derive(Debug, Deserialize)]
 pub struct Response {
