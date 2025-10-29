@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "ai-macros"]
+members = [".", "macros"]
 resolver = "2"
 
 [package]
@@ -8,7 +8,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-rsai-macros = { path = "ai-macros" }
+rsai-macros = { path = "macros" }
 async-trait = "0.1.87"
 bytes = "1.10.1"
 futures = "0.3.31"
