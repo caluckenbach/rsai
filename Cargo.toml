@@ -15,9 +15,11 @@ keywords = ["ai", "llm", "openai", "openrouter", "automation"]
 categories = ["api-bindings"]
 
 
+[workspace.dependencies]
+serde_json = "1.0.140"
 
 [dependencies]
-rsai-macros = { path = "macros" }
+rsai-macros = { path = "macros", version = "0.1.0-pre" }
 async-trait = "0.1.87"
 bytes = "1.10.1"
 futures = "0.3.31"
