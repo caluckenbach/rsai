@@ -267,7 +267,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
             responses_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
                 call_id,
-                output: serde_json::Value::String(result),
+                output: result,
                 r#type: "function_call_output".to_string(),
             }));
         }
@@ -297,7 +297,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
             responses_input.push(InputItem::FunctionCallOutput(FunctionToolCallOutput {
                 call_id: function_call.call_id.clone(),
-                output: serde_json::Value::String(result),
+                output: result,
                 r#type: "function_call_output".to_string(),
             }));
         }
@@ -400,7 +400,7 @@ pub(crate) fn convert_messages_to_responses_format(
             core::types::ConversationMessage::ToolCallResult(tr) => {
                 Ok(InputItem::FunctionCallOutput(FunctionToolCallOutput {
                     call_id: tr.tool_call_id,
-                    output: serde_json::Value::String(tr.content),
+                    output: tr.content,
                     r#type: "function_call_output".to_string(),
                 }))
             }
