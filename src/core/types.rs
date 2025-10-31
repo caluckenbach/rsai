@@ -31,7 +31,7 @@ pub struct ToolCall {
 pub struct ToolCallResult {
     pub id: String,
     pub tool_call_id: String,
-    pub content: String,
+    pub content: serde_json::Value,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,15 +133,9 @@ impl ToolRegistry {
     pub async fn execute(
         &self,
         tool_call: &ToolCall,
-    ) -> Result<String, crate::core::error::LlmError> {
+    ) -> Result<serde_json::Value, crate::core::error::LlmError> {
         if let Some(tool) = self.tools.get(&tool_call.name) {
-            let result = tool.execute(tool_call.arguments.clone()).await?;
-            // If result is a JSON string, extract the actual string value
-            // Otherwise, serialize the result as JSON
-            match result {
-                serde_json::Value::String(s) => Ok(s),
-                other => Ok(other.to_string()),
-            }
+            tool.execute(tool_call.arguments.clone()).await
         } else {
             Err(crate::core::error::LlmError::ToolNotFound(
                 tool_call.name.clone(),
