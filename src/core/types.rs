@@ -167,3 +167,62 @@ impl Default for ToolRegistry {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use async_trait::async_trait;
+
+    use super::*;
+    use std::sync::Arc;
+
+    struct ObjectTool;
+    #[async_trait]
+    impl ToolFunction for ObjectTool {
+        fn schema(&self) -> Tool {
+            Tool {
+                name: "object_tool".to_string(),
+                description: Some("Returns an object".to_string()),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+                strict: Some(true),
+            }
+        }
+
+        fn execute<'a>(
+            &'a self,
+            _params: serde_json::Value,
+        ) -> BoxFuture<'a, Result<serde_json::Value, crate::core::error::LlmError>> {
+            Box::pin(async move {
+                Ok(serde_json::json!({
+                    "name": "test",
+                    "value":42,
+                    "active": true
+                }))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn test_tool_registry_preservers_object_types() {
+        let mut registry = ToolRegistry::new();
+        registry.register(Arc::new(ObjectTool));
+
+        let tool_call = ToolCall {
+            id: "test_Id".to_string(),
+            call_id: "call_123".to_string(),
+            name: "object_tool".to_string(),
+            arguments: serde_json::json!({}),
+        };
+
+        let result = registry.execute(&tool_call).await.unwrap();
+
+        // Verify the result is still structured data an not just a string
+        assert!(result.is_object());
+        assert_eq!(result["name"], "test");
+        assert_eq!(result["value"], 42);
+        assert_eq!(result["active"], true);
+    }
+}
