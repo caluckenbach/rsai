@@ -109,8 +109,9 @@ mod tests {
         };
 
         let result = toolset.registry.execute(&weather_call).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "22.0");
+        let result_val = result.unwrap();
+        assert!(result_val.is_number());
+        assert_eq!(result_val.as_f64(), Some(22.0));
 
         // Test successful execution of calculate_distance
         let distance_call = ToolCall {
@@ -124,8 +125,9 @@ mod tests {
         };
 
         let result = toolset.registry.execute(&distance_call).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "42.5");
+        let result_val = result.unwrap();
+        assert!(result_val.is_number());
+        assert_eq!(result_val.as_f64(), Some(42.5));
     }
 
     #[tokio::test]
@@ -218,8 +220,9 @@ mod tests {
 
         // Execute through registry
         let result = toolset.registry.execute(&tool_call).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "22.0");
+        let result_val = result.unwrap();
+        assert!(result_val.is_number());
+        assert_eq!(result_val.as_f64(), Some(22.0));
 
         // Test synchronous tool (calculate_distance)
         let distance_schema = schemas
@@ -238,8 +241,9 @@ mod tests {
         };
 
         let result = toolset.registry.execute(&distance_call).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "42.5");
+        let result_val = result.unwrap();
+        assert!(result_val.is_number());
+        assert_eq!(result_val.as_f64(), Some(42.5));
     }
 
     #[tokio::test]
@@ -271,7 +275,8 @@ mod tests {
         };
 
         let result = toolset.registry.execute(&call_without_unit).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "22.0");
+        let result_val = result.unwrap();
+        assert!(result_val.is_number());
+        assert_eq!(result_val.as_f64(), Some(22.0))
     }
 }
