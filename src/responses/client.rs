@@ -415,16 +415,25 @@ where
 {
     let s = schema_for!(T);
 
-    let schema_name = s
-        .schema
-        .metadata
-        .as_ref()
-        .and_then(|meta| meta.title.as_ref())
+    let obj = s
+        .as_object()
+        .ok_or_else(|| crate::core::error::LlmError::Provider {
+            message: "Failed to build JSON Schema: root is not an object".to_string(),
+            source: None,
+        })?;
+
+    let schema_name = obj
+        .get("title")
         .ok_or_else(|| crate::core::error::LlmError::Provider {
             message: "Failed to build JSON Schema: Missing schema name".to_string(),
             source: None,
         })?
-        .clone();
+        .as_str()
+        .ok_or_else(|| crate::core::error::LlmError::Provider {
+            message: "Failed to build JSON Schema: title is not a string".to_string(),
+            source: None,
+        })?
+        .to_owned();
 
     let mut schema_value =
         serde_json::to_value(&s).map_err(|e| crate::core::error::LlmError::Parse {
