@@ -32,10 +32,10 @@ pub trait ResponsesProviderConfig {
     /// Model Provider
     fn provider(&self) -> Provider;
 
-    /// Base URL for the API (e.g., "https://api.openai.com")
+    /// Base URL for the API (e.g., `https://api.openai.com`)
     fn base_url(&self) -> &str;
 
-    /// API endpoint for responses (e.g., "/v1/responses")
+    /// API endpoint for responses (e.g., `/v1/responses`)
     fn endpoint(&self) -> &str;
 
     /// Authentication header as (header_name, header_value) tuple
