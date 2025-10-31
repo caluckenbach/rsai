@@ -1,7 +1,14 @@
 [package]
 name = "rsai-macros"
 version = "0.1.0-pre"
+authors = ["Constantin Luckenbach <cluckenbach@protonmail.com>"]
 edition = "2024"
+description = "Macros for the rsai crate providing structured AI generation capabilities"
+homepage = "https://rsai.dev"
+repository = "https://github.com/caluckenbach/rsai"
+license = "MIT"
+keywords = ["ai", "llm", "macros", "procedural-macros", "code-generation"]
+categories = ["api-bindings", "development-tools::procedural-macro-helpers"]
 
 [lib]
 proc-macro = true
