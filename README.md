@@ -1,6 +1,4 @@
-# Rust AI-SDK
-
-A Rust library for creating AI-powered agents with tool usage capabilities.
+> **⚠️ WARNING**: This is a pre-release version with an unstable API. Breaking changes may occur between versions. Use with caution and pin to specific versions in production applications.
 
 ## Quick Start
 
@@ -114,6 +112,10 @@ struct CustomType {
 ```
 
 > **Note**: The library automatically handles provider-specific requirements. For example, OpenAI requires root schemas to be objects, so non-object types like enums are transparently wrapped and unwrapped.
+
+## Known Issues
+
+Currently, the `tool_choice` parameter in the builder pattern is not functional due to an issue in the macro implementation. This will be fixed in a future release.
 
 ## License
 
