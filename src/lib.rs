@@ -33,11 +33,6 @@
 //! }
 //! ```
 //!
-//! ## Known Issues
-//!
-//! Currently, the `tool_choice` parameter in the builder pattern is not functional due to an issue in the macro implementation.
-//! This will be fixed in a future release.
-
 pub mod core;
 pub mod provider;
 pub mod responses;
