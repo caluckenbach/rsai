@@ -19,7 +19,7 @@ fn calculate_distance(_from: String, _to: String) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsai::core::types::{ToolCall, ToolChoice};
+    use rsai::core::types::ToolCall;
     use serde_json::json;
 
     #[test]
@@ -162,35 +162,6 @@ mod tests {
         let tools = toolset.tools();
         assert_eq!(tools.len(), 2);
         assert_eq!(toolset.registry.get_schemas().len(), 2);
-    }
-
-    #[test]
-    fn test_choice_enum_to_tool_choice_conversion() {
-        // Test within the macro scope where Choice enum is available
-        let toolset = toolset![get_weather, calculate_distance];
-
-        // We can't directly access the Choice enum from outside the macro,
-        // but we can verify that the tool choice functionality works
-        // by checking that the schemas support the expected tool names
-        let _schemas = toolset.registry.get_schemas();
-
-        // Verify that we can create ToolChoice::Function variants for our tools
-        let weather_choice = ToolChoice::Function {
-            name: "get_weather".to_string(),
-        };
-        let distance_choice = ToolChoice::Function {
-            name: "calculate_distance".to_string(),
-        };
-
-        match weather_choice {
-            ToolChoice::Function { name } => assert_eq!(name, "get_weather"),
-            _ => panic!("Expected Function variant"),
-        }
-
-        match distance_choice {
-            ToolChoice::Function { name } => assert_eq!(name, "calculate_distance"),
-            _ => panic!("Expected Function variant"),
-        }
     }
 
     #[tokio::test]
