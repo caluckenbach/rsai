@@ -144,6 +144,12 @@ impl ToolRegistry {
     }
 }
 
+impl Default for ToolRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
 pub struct ToolSet {
@@ -153,12 +159,6 @@ pub struct ToolSet {
 impl ToolSet {
     pub fn tools(&self) -> Vec<Tool> {
         self.registry.get_schemas()
-    }
-}
-
-impl Default for ToolRegistry {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

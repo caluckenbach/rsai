@@ -13,9 +13,9 @@
 
 use crate::core::types::{StructuredRequest, StructuredResponse, ToolRegistry};
 use crate::provider::constants::openai;
-use crate::responses::{ResponsesClient, ResponsesProviderConfig};
 
 use crate::core::{builder::LlmBuilder, error::LlmError, traits::LlmProvider};
+use crate::responses::{ResponsesClient, ResponsesProviderConfig};
 use async_trait::async_trait;
 
 /// OpenAI-specific configuration for the responses client

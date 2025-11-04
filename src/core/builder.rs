@@ -287,13 +287,8 @@ impl LlmBuilder<private::MessagesSet> {
 }
 
 impl LlmBuilder<private::ToolsSet> {
-    /// Set the tool choice using a type-safe enum that implements [`Into<ToolChoice>`].
-    /// This accepts the generated toolset::Choice enum for compile-time validation.
-    pub fn tool_choice<TC>(mut self, choice: TC) -> Self
-    where
-        TC: Into<ToolChoice>,
-    {
-        self.fields.tool_choice = Some(choice.into());
+    pub fn tool_choice(mut self, choice: ToolChoice) -> Self {
+        self.fields.tool_choice = Some(choice);
         self
     }
 
