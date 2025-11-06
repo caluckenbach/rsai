@@ -50,9 +50,9 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
         #[derive(Clone)]
         pub struct #wrapper_name;
 
-        impl rsai::core::ToolFunction for #wrapper_name {
-            fn schema(&self) -> rsai::core::types::Tool {
-                use rsai::core::types::Tool;
+        impl rsai::ToolFunction for #wrapper_name {
+            fn schema(&self) -> rsai::Tool {
+                use rsai::Tool;
                 Tool {
                     name: #fn_name_str.to_string(),
                     description: #description,
@@ -61,8 +61,8 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
                 }
             }
 
-            fn execute<'a>(&'a self, params: ::serde_json::Value) -> rsai::core::types::BoxFuture<'a, Result<::serde_json::Value, rsai::core::error::LlmError>> {
-                use rsai::core::{types::BoxFuture, error::LlmError};
+            fn execute<'a>(&'a self, params: ::serde_json::Value) -> rsai::BoxFuture<'a, Result<::serde_json::Value, rsai::LlmError>> {
+                use rsai::{BoxFuture, LlmError};
                 Box::pin(async move {
                     #execute_impl
                 })

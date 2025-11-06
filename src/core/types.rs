@@ -1,4 +1,4 @@
-use crate::core::traits::ToolFunction;
+use crate::core::{LlmError, traits::ToolFunction};
 use crate::provider::Provider;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -130,16 +130,11 @@ impl ToolRegistry {
         self.tools.values().map(|tool| tool.schema()).collect()
     }
 
-    pub async fn execute(
-        &self,
-        tool_call: &ToolCall,
-    ) -> Result<serde_json::Value, crate::core::error::LlmError> {
+    pub async fn execute(&self, tool_call: &ToolCall) -> Result<serde_json::Value, LlmError> {
         if let Some(tool) = self.tools.get(&tool_call.name) {
             tool.execute(tool_call.arguments.clone()).await
         } else {
-            Err(crate::core::error::LlmError::ToolNotFound(
-                tool_call.name.clone(),
-            ))
+            Err(LlmError::ToolNotFound(tool_call.name.clone()))
         }
     }
 }
@@ -188,7 +183,7 @@ mod tests {
         fn execute<'a>(
             &'a self,
             _params: serde_json::Value,
-        ) -> BoxFuture<'a, Result<serde_json::Value, crate::core::error::LlmError>> {
+        ) -> BoxFuture<'a, Result<serde_json::Value, LlmError>> {
             Box::pin(async move {
                 Ok(serde_json::json!({
                     "name": "test",

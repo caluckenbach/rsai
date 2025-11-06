@@ -33,14 +33,35 @@
 //! }
 //! ```
 //!
-pub mod core;
-pub mod provider;
-pub mod responses;
+mod core;
+mod provider;
+mod responses;
 
-pub use core::builder::ApiKey;
-pub use core::{
-    builder::llm,
-    types::{ChatRole, Message},
-};
-pub use provider::Provider;
-pub use rsai_macros::completion_schema;
+// Core types
+pub use core::{ChatRole, ConversationMessage, Message};
+pub use core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
+
+// Configuration types
+pub use core::{ApiKey, GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
+
+// Response types
+pub use core::{LanguageModelUsage, ResponseMetadata, StructuredResponse};
+
+// Async helpers
+pub use core::BoxFuture;
+
+// Error handling
+pub use core::LlmError;
+pub type Result<T> = std::result::Result<T, LlmError>;
+
+// Gen AI request builders
+pub use core::llm;
+
+// Gen AI providers
+pub use provider::{OpenAiClient, OpenAiConfig, OpenRouterClient, OpenRouterConfig, Provider};
+
+// Traits
+pub use core::{LlmProvider, ToolFunction};
+
+// Macros from `rsai-macros`
+pub use rsai_macros::{completion_schema, tool, toolset};

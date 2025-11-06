@@ -11,11 +11,12 @@
 //! When adding new API structs, include all fields from the OpenRouter documentation and mark
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
-use crate::core::types::{StructuredRequest, StructuredResponse, ToolRegistry};
 use crate::provider::constants::openrouter;
 use crate::responses::{ResponsesClient, ResponsesProviderConfig};
 
-use crate::core::{builder::LlmBuilder, error::LlmError, traits::LlmProvider};
+use crate::core::{
+    LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolRegistry,
+};
 use async_trait::async_trait;
 
 /// OpenRouter-specific configuration for the responses client

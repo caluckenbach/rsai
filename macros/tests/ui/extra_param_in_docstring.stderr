@@ -1,13 +1,5 @@
 error: Parameter 'nonexistent' found in docstring but not in function parameters
- --> tests/ui/extra_param_in_docstring.rs:9:1
+ --> tests/ui/extra_param_in_docstring.rs:7:1
   |
-9 | fn function_with_extra_param(param1: String) -> String {
+7 | fn function_with_extra_param(param1: String) -> String {
   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-warning: unused imports: `ToolFunction`, `error::LlmError`, and `types::Tool`
- --> tests/ui/extra_param_in_docstring.rs:2:18
-  |
-2 | use rsai::core::{ToolFunction, types::Tool, error::LlmError};
-  |                  ^^^^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
-  |
-  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default

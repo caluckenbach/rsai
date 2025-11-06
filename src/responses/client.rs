@@ -9,20 +9,15 @@
 
 use crate::{
     Provider,
+    core::{
+        ChatRole, ConversationMessage, LanguageModelUsage, LlmError, ResponseMetadata,
+        StructuredRequest, StructuredResponse, Tool, ToolCall, ToolRegistry,
+    },
     responses::{
-        Format, FormatType, FunctionToolCallOutput, JsonSchema, JsonSchemaType,
-        request::{InputItem, Request, Tool},
+        Format, FormatType, FunctionToolCall, FunctionToolCallOutput, JsonSchema, JsonSchemaType,
+        request::{InputItem, InputMessage, InputMessageRole, Request},
         response::{MessageContent, OutputContent, Response},
     },
-};
-use crate::{
-    core::{
-        self,
-        types::{
-            ConversationMessage, StructuredRequest, StructuredResponse, ToolCall, ToolRegistry,
-        },
-    },
-    responses::FunctionToolCall,
 };
 use schemars::schema_for;
 use serde::Deserialize;
@@ -63,10 +58,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Make an API request to the responses endpoint
-    pub async fn make_api_request(
-        &self,
-        request: Request,
-    ) -> Result<Response, crate::core::error::LlmError> {
+    pub async fn make_api_request(&self, request: Request) -> Result<Response, LlmError> {
         let url = format!("{}{}", self.config.base_url(), self.config.endpoint());
 
         let mut req_builder = self.client.post(&url).json(&request);
@@ -80,39 +72,34 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
             req_builder = req_builder.header(&name, value);
         }
 
-        let res = req_builder
-            .send()
-            .await
-            .map_err(|e| crate::core::error::LlmError::Network {
-                message: "Failed to complete request".to_string(),
-                source: Box::new(e),
-            })?;
+        let res = req_builder.send().await.map_err(|e| LlmError::Network {
+            message: "Failed to complete request".to_string(),
+            source: Box::new(e),
+        })?;
 
         if !res.status().is_success() {
             let status = res.status();
             let error_text = res
                 .text()
                 .await
-                .map_err(|e| crate::core::error::LlmError::Api {
+                .map_err(|e| LlmError::Api {
                     message: "Failed to get the response text".to_string(),
                     status_code: Some(status.as_u16()),
                     source: Some(Box::new(e)),
                 })?
                 .clone();
 
-            return Err(crate::core::error::LlmError::Api {
+            return Err(LlmError::Api {
                 message: format!("API returned error: {error_text}"),
                 status_code: Some(status.as_u16()),
                 source: None,
             });
         }
 
-        res.json()
-            .await
-            .map_err(|e| crate::core::error::LlmError::Parse {
-                message: "Failed to parse API response".to_string(),
-                source: Box::new(e),
-            })
+        res.json().await.map_err(|e| LlmError::Parse {
+            message: "Failed to parse API response".to_string(),
+            source: Box::new(e),
+        })
     }
 
     /// Handle the complete tool calling loop until a final response is received
@@ -120,7 +107,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         &self,
         request: StructuredRequest,
         tool_registry: &ToolRegistry,
-    ) -> Result<StructuredResponse<T>, crate::core::error::LlmError>
+    ) -> Result<StructuredResponse<T>, LlmError>
     where
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
@@ -156,7 +143,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         &self,
         request: &StructuredRequest,
         responses_input: &[InputItem],
-    ) -> Result<Request, crate::core::error::LlmError>
+    ) -> Result<Request, LlmError>
     where
         T: schemars::JsonSchema,
     {
@@ -185,7 +172,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
                 tools
                     .iter()
                     .map(crate::responses::create_function_tool)
-                    .collect::<Box<[Tool]>>()
+                    .collect::<Box<[crate::responses::Tool]>>()
             });
             req.tool_choice = tool_config.tool_choice.as_ref().map(|tc| tc.clone().into());
             req.parallel_tool_calls = tool_config.parallel_tool_calls;
@@ -223,7 +210,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         responses_input: &mut Vec<InputItem>,
         tool_registry: &ToolRegistry,
         is_parallel: bool,
-    ) -> Result<(), crate::core::error::LlmError> {
+    ) -> Result<(), LlmError> {
         if is_parallel && function_calls.len() > 1 {
             self.process_parallel_function_calls(function_calls, responses_input, tool_registry)
                 .await
@@ -239,7 +226,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         function_calls: &[&FunctionToolCall],
         responses_input: &mut Vec<InputItem>,
         tool_registry: &ToolRegistry,
-    ) -> Result<(), crate::core::error::LlmError> {
+    ) -> Result<(), LlmError> {
         let mut pending_executions = Vec::new();
 
         // Add all function calls to input and prepare for execution
@@ -281,7 +268,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         function_calls: &[&FunctionToolCall],
         responses_input: &mut Vec<InputItem>,
         tool_registry: &ToolRegistry,
-    ) -> Result<(), crate::core::error::LlmError> {
+    ) -> Result<(), LlmError> {
         for function_call in function_calls {
             responses_input.push(InputItem::FunctionCall((*function_call).clone()));
 
@@ -309,14 +296,12 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     pub fn parse_function_arguments(
         &self,
         arguments: &serde_json::Value,
-    ) -> Result<serde_json::Value, crate::core::error::LlmError> {
+    ) -> Result<serde_json::Value, LlmError> {
         match arguments {
-            serde_json::Value::String(s) => {
-                serde_json::from_str(s).map_err(|e| crate::core::error::LlmError::Parse {
-                    message: format!("Failed to parse tool arguments: {s}"),
-                    source: Box::new(e),
-                })
-            }
+            serde_json::Value::String(s) => serde_json::from_str(s).map_err(|e| LlmError::Parse {
+                message: format!("Failed to parse tool arguments: {s}"),
+                source: Box::new(e),
+            }),
             other => Ok(other.clone()),
         }
     }
@@ -331,7 +316,7 @@ pub(crate) struct ValueWrapper<T> {
 }
 
 /// Convert core Tool to responses API Tool
-pub(crate) fn create_function_tool(tool: &core::types::Tool) -> Tool {
+pub(crate) fn create_function_tool(tool: &Tool) -> crate::responses::Tool {
     let strict = tool.strict.unwrap_or(true);
     let mut parameters = tool.parameters.clone();
 
@@ -350,7 +335,7 @@ pub(crate) fn create_function_tool(tool: &core::types::Tool) -> Tool {
         }
     }
 
-    Tool {
+    crate::responses::Tool {
         name: tool.name.clone(),
         parameters,
         strict: Some(strict),
@@ -361,43 +346,31 @@ pub(crate) fn create_function_tool(tool: &core::types::Tool) -> Tool {
 /// Convert core messages to responses API format
 pub(crate) fn convert_messages_to_responses_format(
     messages: Vec<ConversationMessage>,
-) -> Result<Vec<InputItem>, crate::core::error::LlmError> {
+) -> Result<Vec<InputItem>, LlmError> {
     messages
         .into_iter()
         .map(|msg| match msg {
-            core::types::ConversationMessage::Chat(m) => Ok(InputItem::Message(
-                crate::responses::request::InputMessage {
-                    role: match m.role {
-                        core::types::ChatRole::System => {
-                            crate::responses::request::InputMessageRole::System
-                        }
-                        core::types::ChatRole::User => {
-                            crate::responses::request::InputMessageRole::User
-                        }
-                        core::types::ChatRole::Assistant => {
-                            crate::responses::request::InputMessageRole::Assistant
-                        }
-                    },
-                    content: m.content,
+            ConversationMessage::Chat(m) => Ok(InputItem::Message(InputMessage {
+                role: match m.role {
+                    ChatRole::System => InputMessageRole::System,
+                    ChatRole::User => InputMessageRole::User,
+                    ChatRole::Assistant => InputMessageRole::Assistant,
                 },
-            )),
-            core::types::ConversationMessage::ToolCall(tc) => {
-                Ok(InputItem::FunctionCall(FunctionToolCall {
-                    r#type: "function_call".to_string(),
-                    id: tc.id,
-                    call_id: tc.call_id,
-                    name: tc.name,
-                    arguments: serde_json::Value::String(
-                        serde_json::to_string(&tc.arguments).map_err(|e| {
-                            crate::core::error::LlmError::Parse {
-                                message: "Failed to serialize tool call arguments".to_string(),
-                                source: Box::new(e),
-                            }
-                        })?,
-                    ),
-                }))
-            }
-            core::types::ConversationMessage::ToolCallResult(tr) => {
+                content: m.content,
+            })),
+            ConversationMessage::ToolCall(tc) => Ok(InputItem::FunctionCall(FunctionToolCall {
+                r#type: "function_call".to_string(),
+                id: tc.id,
+                call_id: tc.call_id,
+                name: tc.name,
+                arguments: serde_json::Value::String(
+                    serde_json::to_string(&tc.arguments).map_err(|e| LlmError::Parse {
+                        message: "Failed to serialize tool call arguments".to_string(),
+                        source: Box::new(e),
+                    })?,
+                ),
+            })),
+            ConversationMessage::ToolCallResult(tr) => {
                 Ok(InputItem::FunctionCallOutput(FunctionToolCallOutput {
                     call_id: tr.tool_call_id,
                     output: tr.content,
@@ -409,37 +382,34 @@ pub(crate) fn convert_messages_to_responses_format(
 }
 
 /// Create JSON schema format for a given type
-pub(crate) fn create_format_for_type<T>() -> Result<Format, crate::core::error::LlmError>
+pub(crate) fn create_format_for_type<T>() -> Result<Format, LlmError>
 where
     T: schemars::JsonSchema,
 {
     let s = schema_for!(T);
 
-    let obj = s
-        .as_object()
-        .ok_or_else(|| crate::core::error::LlmError::Provider {
-            message: "Failed to build JSON Schema: root is not an object".to_string(),
-            source: None,
-        })?;
+    let obj = s.as_object().ok_or_else(|| LlmError::Provider {
+        message: "Failed to build JSON Schema: root is not an object".to_string(),
+        source: None,
+    })?;
 
     let schema_name = obj
         .get("title")
-        .ok_or_else(|| crate::core::error::LlmError::Provider {
+        .ok_or_else(|| LlmError::Provider {
             message: "Failed to build JSON Schema: Missing schema name".to_string(),
             source: None,
         })?
         .as_str()
-        .ok_or_else(|| crate::core::error::LlmError::Provider {
+        .ok_or_else(|| LlmError::Provider {
             message: "Failed to build JSON Schema: title is not a string".to_string(),
             source: None,
         })?
         .to_owned();
 
-    let mut schema_value =
-        serde_json::to_value(&s).map_err(|e| crate::core::error::LlmError::Parse {
-            message: "Failed to build JSON Schema".to_string(),
-            source: Box::new(e),
-        })?;
+    let mut schema_value = serde_json::to_value(&s).map_err(|e| LlmError::Parse {
+        message: "Failed to build JSON Schema".to_string(),
+        source: Box::new(e),
+    })?;
 
     let needs_wrapping = schema_value
         .get("type")
@@ -471,33 +441,26 @@ where
 pub(crate) fn create_core_structured_response<T>(
     res: Response,
     provider: crate::provider::Provider,
-) -> Result<StructuredResponse<T>, crate::core::error::LlmError>
+) -> Result<StructuredResponse<T>, LlmError>
 where
     T: serde::de::DeserializeOwned,
 {
-    let output_content =
-        res.output
-            .first()
-            .ok_or_else(|| crate::core::error::LlmError::Provider {
-                message: "No output in response".to_string(),
-                source: None,
-            })?;
+    let output_content = res.output.first().ok_or_else(|| LlmError::Provider {
+        message: "No output in response".to_string(),
+        source: None,
+    })?;
 
     match output_content {
         OutputContent::OutputMessage(message) => {
-            let content =
-                message
-                    .content
-                    .first()
-                    .ok_or_else(|| crate::core::error::LlmError::Provider {
-                        message: "No content in message".to_string(),
-                        source: None,
-                    })?;
+            let content = message.content.first().ok_or_else(|| LlmError::Provider {
+                message: "No content in message".to_string(),
+                source: None,
+            })?;
 
             let text = match content {
                 MessageContent::OutputText(output) => &output.text,
                 MessageContent::Refusal(refusal) => {
-                    return Err(crate::core::error::LlmError::Api {
+                    return Err(LlmError::Api {
                         message: format!("Model refused: {}", refusal.refusal),
                         status_code: None,
                         source: None,
@@ -510,7 +473,7 @@ where
                 if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(text) {
                     wrapped.value
                 } else {
-                    serde_json::from_str(text).map_err(|e| crate::core::error::LlmError::Parse {
+                    serde_json::from_str(text).map_err(|e| LlmError::Parse {
                         message: "Failed to parse structured output".to_string(),
                         source: Box::new(e),
                     })?
@@ -518,19 +481,19 @@ where
 
             Ok(StructuredResponse {
                 content: parsed_content,
-                usage: core::types::LanguageModelUsage {
+                usage: LanguageModelUsage {
                     prompt_tokens: res.usage.input_tokens,
                     completion_tokens: res.usage.output_tokens,
                     total_tokens: res.usage.total_tokens,
                 },
-                metadata: core::types::ResponseMetadata {
+                metadata: ResponseMetadata {
                     provider,
                     model: res.model,
                     id: res.id,
                 },
             })
         }
-        OutputContent::FunctionCall(_) => Err(crate::core::error::LlmError::Provider {
+        OutputContent::FunctionCall(_) => Err(LlmError::Provider {
             message: "Function call response received when expecting structured output".to_string(),
             source: None,
         }),

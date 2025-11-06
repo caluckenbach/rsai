@@ -11,10 +11,11 @@
 //! When adding new API structs, include all fields from the OpenAI documentation and mark
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
-use crate::core::types::{StructuredRequest, StructuredResponse, ToolRegistry};
 use crate::provider::constants::openai;
 
-use crate::core::{builder::LlmBuilder, error::LlmError, traits::LlmProvider};
+use crate::core::{
+    LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolRegistry,
+};
 use crate::responses::{ResponsesClient, ResponsesProviderConfig};
 use async_trait::async_trait;
 

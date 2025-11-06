@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{core::types, responses::types::FunctionToolCall};
+use crate::responses::types::FunctionToolCall;
 
 #[derive(Debug, Serialize)]
 pub struct Request {
@@ -102,13 +102,13 @@ pub enum ToolChoice {
     Function { name: String },
 }
 
-impl From<types::ToolChoice> for ToolChoice {
-    fn from(value: types::ToolChoice) -> Self {
+impl From<crate::core::ToolChoice> for ToolChoice {
+    fn from(value: crate::core::ToolChoice) -> Self {
         match value {
-            types::ToolChoice::None => ToolChoice::None,
-            types::ToolChoice::Auto => ToolChoice::Auto,
-            types::ToolChoice::Required => ToolChoice::Required,
-            types::ToolChoice::Function { name } => ToolChoice::Function { name },
+            crate::core::ToolChoice::None => ToolChoice::None,
+            crate::core::ToolChoice::Auto => ToolChoice::Auto,
+            crate::core::ToolChoice::Required => ToolChoice::Required,
+            crate::core::ToolChoice::Function { name } => ToolChoice::Function { name },
         }
     }
 }
