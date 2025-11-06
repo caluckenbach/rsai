@@ -17,6 +17,8 @@ categories = ["api-bindings"]
 
 [workspace.dependencies]
 serde_json = "1.0.140"
+serde = { version = "1.0.218", features = ["derive"] }
+schemars = "1.0.4"
 
 [dependencies]
 rsai-macros = { path = "macros", version = "0.1.0-pre" }
@@ -25,9 +27,9 @@ bytes = "1.10.1"
 futures = "0.3.31"
 rand = "0.9.0"
 reqwest = { version = "0.12.12", features = ["json", "stream"] }
-schemars = "1.0.4"
-serde = { version = "1.0.218", features = ["derive"] }
-serde_json = "1.0.140"
+schemars = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = "2.0.12"
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-stream = "0.1.17"
