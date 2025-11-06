@@ -1,6 +1,9 @@
 mod constants;
-pub mod openai;
-pub mod openrouter;
+pub(crate) mod openai;
+pub(crate) mod openrouter;
+
+pub use openai::{OpenAiClient, OpenAiConfig};
+pub use openrouter::{OpenRouterClient, OpenRouterConfig};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {

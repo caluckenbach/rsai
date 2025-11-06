@@ -12,7 +12,7 @@ fn test_should_compile() {
         param1
     }
 
-    use rsai::core::ToolFunction;
+    use rsai::ToolFunction;
     let tool_instance = ValidFunctionTool;
     let tool = tool_instance.schema();
     assert_eq!(tool.name, "valid_function");

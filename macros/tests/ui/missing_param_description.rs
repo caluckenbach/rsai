@@ -1,6 +1,4 @@
-// Use the actual types from the main crate
-use rsai::core::{ToolFunction, types::Tool, error::LlmError};
-use rsai_macros::tool;
+use rsai::tool;
 
 #[tool]
 /// Function with missing parameter description

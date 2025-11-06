@@ -19,7 +19,7 @@ fn calculate_distance(_from: String, _to: String) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rsai::core::types::ToolCall;
+    use rsai::ToolCall;
     use serde_json::json;
 
     #[test]

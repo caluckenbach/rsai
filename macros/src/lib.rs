@@ -285,7 +285,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// 3. Builds the final `rsai::ToolSet`
 ///
 /// ```rust,no_run
-/// use rsai::core::types::ToolRegistry;
+/// use rsai::ToolRegistry;
 /// use std::sync::Arc;
 ///
 /// {
