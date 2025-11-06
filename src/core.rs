@@ -3,8 +3,7 @@ mod error;
 mod traits;
 mod types;
 
-pub(crate) use builder::LlmBuilder;
-pub use builder::{ApiKey, llm};
+pub use builder::{ApiKey, LlmBuilder, llm};
 
 pub use error::LlmError;
 pub use traits::{LlmProvider, ToolFunction};

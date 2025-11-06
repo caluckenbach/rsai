@@ -42,7 +42,7 @@ pub use core::{ChatRole, ConversationMessage, Message};
 pub use core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
 
 // Configuration types
-pub use core::{ApiKey, GenerationConfig, ToolChoice, ToolConfig};
+pub use core::{ApiKey, GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
 
 // Response types
 pub use core::{LanguageModelUsage, ResponseMetadata, StructuredResponse};
