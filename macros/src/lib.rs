@@ -3,7 +3,7 @@
 //! This crate provides three main macros:
 //!
 //! - [`completion_schema`] - Automatically generates JSON schema for response types
-//! - [`tool`] - Transforms Rust functions into callable tools with automatic schema generation
+//! - [`tool`](fn@tool) - Transforms Rust functions into callable tools with automatic schema generation
 //! - [`toolset`] - Creates collections of tools
 //!
 //! # Quick Start
@@ -40,7 +40,7 @@ use quote::quote;
 mod tool;
 mod tools;
 
-/// Attribute macro for types used with the `complete::<T>()` method.
+/// Attribute macro for types used with the `rsai::llm()::complete::<T>()` method.
 ///
 /// This macro automatically adds the necessary derives and attributes to make a struct
 /// suitable for structured responses. It ensures strict validation of
@@ -79,11 +79,11 @@ mod tools;
 ///
 /// # Supported Types
 ///
-/// All types that implement `serde::Deserialize` and `schemars::JsonSchema` are supported,
+/// All types that implement [`serde::Deserialize`] and [`schemars::JsonSchema`] are supported,
 /// including:
-/// - Primitive types (String, i32, f64, bool, etc.)
-/// - Optionals (`Option<T>`)
-/// - Vectors (`Vec<T>`)
+/// - Primitive types ([`String`], [`i32`], [`f64`], [`bool`], etc.)
+/// - Optionals ([`Option<T>`])
+/// - Vectors ([`Vec<T>`])
 /// - Nested structs and enums
 /// - Custom types with appropriate trait implementations
 #[proc_macro_attribute]
