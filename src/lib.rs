@@ -37,10 +37,29 @@ pub mod core;
 pub mod provider;
 pub mod responses;
 
+// Core types
+pub use core::types::{ChatRole, ConversationMessage, Message};
+pub use core::types::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
+
+// Configuration types
 pub use core::builder::ApiKey;
-pub use core::{
-    builder::llm,
-    types::{ChatRole, Message},
-};
+pub use core::types::{GenerationConfig, ToolChoice, ToolConfig};
+
+// Response types
+pub use core::types::{LanguageModelUsage, ResponseMetadata, StructuredResponse};
+
+// Error handling
+pub use core::error::LlmError;
+pub type Result<T> = std::result::Result<T, LlmError>;
+
+// Gen AI request builders
+pub use core::builder::llm;
+
+// Gen AI providers
 pub use provider::Provider;
-pub use rsai_macros::completion_schema;
+
+// Traits
+pub use core::traits::{LlmProvider, ToolFunction};
+
+// Macros from `rsai-macros`
+pub use rsai_macros::{completion_schema, tool, toolset};
