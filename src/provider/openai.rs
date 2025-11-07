@@ -11,18 +11,21 @@
 //! When adding new API structs, include all fields from the OpenAI documentation and mark
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
+use crate::provider::ToolCallingConfig;
 use crate::provider::constants::openai;
 
 use crate::core::{
     LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolRegistry,
 };
-use crate::responses::{ResponsesClient, ResponsesProviderConfig};
+use crate::responses::{ResponsesClient, ResponsesProviderConfig, ToolCallingGuard};
 use async_trait::async_trait;
 
 /// OpenAI-specific configuration for the responses client
 pub struct OpenAiConfig {
     pub api_key: String,
     pub base_url: String,
+    /// Configuration for tool calling limits
+    pub tool_calling_config: Option<ToolCallingConfig>,
 }
 
 impl OpenAiConfig {
@@ -30,12 +33,26 @@ impl OpenAiConfig {
         Self {
             api_key,
             base_url: openai::API_BASE.to_string(),
+            tool_calling_config: Some(ToolCallingConfig::default()),
         }
     }
 
     pub fn with_base_url(mut self, base_url: String) -> Self {
         self.base_url = base_url;
         self
+    }
+
+    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Self {
+        self.tool_calling_config = Some(config);
+        self
+    }
+
+    pub fn get_tool_calling_guard(&self) -> ToolCallingGuard {
+        if let Some(ref config) = self.tool_calling_config {
+            ToolCallingGuard::with_limits(config.max_iterations, config.timeout)
+        } else {
+            ToolCallingGuard::new()
+        }
     }
 }
 
@@ -85,6 +102,19 @@ impl OpenAiClient {
         let new_config = OpenAiConfig {
             api_key: current_api_key.clone(),
             base_url,
+            tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
+        };
+        self.responses_client = ResponsesClient::new(new_config);
+        self
+    }
+
+    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Self {
+        let current_api_key = &self.responses_client.config.api_key;
+        let base_url = &self.responses_client.config.base_url;
+        let new_config = OpenAiConfig {
+            api_key: current_api_key.clone(),
+            base_url: base_url.clone(),
+            tool_calling_config: Some(config),
         };
         self.responses_client = ResponsesClient::new(new_config);
         self
@@ -109,9 +139,10 @@ impl LlmProvider for OpenAiClient {
             .is_some();
 
         if has_tools && let Some(tool_registry) = tool_registry {
+            let mut guard = self.responses_client.config.get_tool_calling_guard();
             return self
                 .responses_client
-                .handle_tool_calling_loop(request, tool_registry)
+                .handle_tool_calling_loop(request, tool_registry, &mut guard)
                 .await;
         }
 

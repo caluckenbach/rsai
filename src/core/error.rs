@@ -46,4 +46,10 @@ pub enum LlmError {
 
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
+
+    #[error("Tool call iteration limit exceeded: {limit} iterations")]
+    ToolCallIterationLimit { limit: u32 },
+
+    #[error("Tool call processing timeout exceeded: {timeout:?}")]
+    ToolCallTimeout { timeout: std::time::Duration },
 }
