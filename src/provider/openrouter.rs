@@ -11,12 +11,12 @@
 //! When adding new API structs, include all fields from the OpenRouter documentation and mark
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
-use crate::provider::ToolCallingConfig;
 use crate::provider::constants::openrouter;
-use crate::responses::{ResponsesClient, ResponsesProviderConfig, ToolCallingGuard};
+use crate::responses::{ResponsesClient, ResponsesProviderConfig};
 
 use crate::core::{
-    LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolRegistry,
+    LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolCallingConfig,
+    ToolCallingGuard, ToolRegistry,
 };
 use async_trait::async_trait;
 
@@ -156,7 +156,7 @@ impl OpenRouterClient {
         let base_url = &self.responses_client.config.base_url;
         let http_referer = self.responses_client.config.http_referer.clone();
         let x_title = self.responses_client.config.x_title.clone();
-        
+
         let new_config = OpenRouterConfig {
             api_key: current_api_key.clone(),
             base_url: base_url.clone(),

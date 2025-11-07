@@ -46,21 +46,18 @@ async fn test_custom_guard_values() {
 
 #[tokio::test]
 async fn test_timeout_error() {
-    use tokio::time::{sleep, Duration as TokioDuration};
+    use tokio::time::{Duration as TokioDuration, sleep};
 
     // Create a guard with very short timeout
     let guard = ToolCallingGuard::with_limits(1000, Duration::from_millis(100));
 
     // Simulate a timeout scenario
     let start = std::time::Instant::now();
-    let timeout_result = tokio::time::timeout(
-        guard.timeout,
-        async {
-            // Simulate long-running operation
-            sleep(TokioDuration::from_millis(200)).await;
-            Ok::<(), LlmError>(())
-        },
-    )
+    let timeout_result = tokio::time::timeout(guard.timeout, async {
+        // Simulate long-running operation
+        sleep(TokioDuration::from_millis(200)).await;
+        Ok::<(), LlmError>(())
+    })
     .await;
 
     let elapsed = start.elapsed();
@@ -116,8 +113,8 @@ async fn test_openai_config_tool_calling() {
         timeout: Duration::from_secs(600),
     };
 
-    let config_with_custom = OpenAiConfig::new("test-key".to_string())
-        .with_tool_calling_config(custom_config);
+    let config_with_custom =
+        OpenAiConfig::new("test-key".to_string()).with_tool_calling_config(custom_config);
     let custom_guard = config_with_custom.get_tool_calling_guard();
 
     assert_eq!(custom_guard.max_iterations, 75);
@@ -139,8 +136,8 @@ async fn test_openrouter_config_tool_calling() {
         timeout: Duration::from_secs(900),
     };
 
-    let config_with_custom = OpenRouterConfig::new("test-key".to_string())
-        .with_tool_calling_config(custom_config);
+    let config_with_custom =
+        OpenRouterConfig::new("test-key".to_string()).with_tool_calling_config(custom_config);
     let custom_guard = config_with_custom.get_tool_calling_guard();
 
     assert_eq!(custom_guard.max_iterations, 100);
