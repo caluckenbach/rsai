@@ -11,8 +11,9 @@
 //! When adding new API structs, include all fields from the OpenRouter documentation and mark
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
+use crate::provider::ToolCallingConfig;
 use crate::provider::constants::openrouter;
-use crate::responses::{ResponsesClient, ResponsesProviderConfig};
+use crate::responses::{ResponsesClient, ResponsesProviderConfig, ToolCallingGuard};
 
 use crate::core::{
     LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolRegistry,
@@ -25,6 +26,8 @@ pub struct OpenRouterConfig {
     pub base_url: String,
     pub http_referer: Option<String>,
     pub x_title: Option<String>,
+    /// Configuration for tool calling limits
+    pub tool_calling_config: Option<ToolCallingConfig>,
 }
 
 impl OpenRouterConfig {
@@ -34,6 +37,7 @@ impl OpenRouterConfig {
             base_url: openrouter::API_BASE.to_string(),
             http_referer: None,
             x_title: None,
+            tool_calling_config: Some(ToolCallingConfig::default()),
         }
     }
 
@@ -50,6 +54,19 @@ impl OpenRouterConfig {
     pub fn with_x_title(mut self, x_title: String) -> Self {
         self.x_title = Some(x_title);
         self
+    }
+
+    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Self {
+        self.tool_calling_config = Some(config);
+        self
+    }
+
+    pub fn get_tool_calling_guard(&self) -> ToolCallingGuard {
+        if let Some(ref config) = self.tool_calling_config {
+            ToolCallingGuard::with_limits(config.max_iterations, config.timeout)
+        } else {
+            ToolCallingGuard::new()
+        }
     }
 }
 
@@ -118,6 +135,7 @@ impl OpenRouterClient {
             base_url,
             http_referer,
             x_title,
+            tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
         };
         self.responses_client = ResponsesClient::new(new_config);
         self
@@ -130,6 +148,23 @@ impl OpenRouterClient {
 
     pub fn with_x_title(mut self, x_title: String) -> Self {
         self.responses_client.config.x_title = Some(x_title);
+        self
+    }
+
+    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Self {
+        let current_api_key = &self.responses_client.config.api_key;
+        let base_url = &self.responses_client.config.base_url;
+        let http_referer = self.responses_client.config.http_referer.clone();
+        let x_title = self.responses_client.config.x_title.clone();
+        
+        let new_config = OpenRouterConfig {
+            api_key: current_api_key.clone(),
+            base_url: base_url.clone(),
+            http_referer,
+            x_title,
+            tool_calling_config: Some(config),
+        };
+        self.responses_client = ResponsesClient::new(new_config);
         self
     }
 }
@@ -152,9 +187,10 @@ impl LlmProvider for OpenRouterClient {
             .is_some();
 
         if has_tools && let Some(tool_registry) = tool_registry {
+            let mut guard = self.responses_client.config.get_tool_calling_guard();
             return self
                 .responses_client
-                .handle_tool_calling_loop(request, tool_registry)
+                .handle_tool_calling_loop(request, tool_registry, &mut guard)
                 .await;
         }
 

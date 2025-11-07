@@ -40,6 +40,7 @@ mod responses;
 // Core types
 pub use core::{ChatRole, ConversationMessage, Message};
 pub use core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
+pub use responses::ToolCallingGuard;
 
 // Configuration types
 pub use core::{ApiKey, GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
@@ -58,6 +59,7 @@ pub type Result<T> = std::result::Result<T, LlmError>;
 pub use core::llm;
 
 // Gen AI providers
+pub use provider::ToolCallingConfig;
 pub use provider::{OpenAiClient, OpenAiConfig, OpenRouterClient, OpenRouterConfig, Provider};
 
 // Traits
