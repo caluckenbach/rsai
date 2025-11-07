@@ -1,11 +1,13 @@
 mod builder;
 mod error;
+mod tool_guard;
 mod traits;
 mod types;
 
 pub use builder::{ApiKey, LlmBuilder, llm};
 
 pub use error::LlmError;
+pub use tool_guard::{ToolCallingConfig, ToolCallingGuard};
 pub use traits::{LlmProvider, ToolFunction};
 
 pub(crate) use types::StructuredRequest;

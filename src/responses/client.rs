@@ -11,7 +11,7 @@ use crate::{
     Provider,
     core::{
         ChatRole, ConversationMessage, LanguageModelUsage, LlmError, ResponseMetadata,
-        StructuredRequest, StructuredResponse, Tool, ToolCall, ToolRegistry,
+        StructuredRequest, StructuredResponse, Tool, ToolCall, ToolCallingGuard, ToolRegistry,
     },
     responses::{
         Format, FormatType, FunctionToolCall, FunctionToolCallOutput, JsonSchema, JsonSchemaType,
@@ -21,7 +21,6 @@ use crate::{
 };
 use schemars::schema_for;
 use serde::Deserialize;
-use std::time::Duration;
 
 /// Configuration trait for providers that use the OpenAI-style responses API
 pub trait ResponsesProviderConfig {
@@ -47,59 +46,6 @@ pub trait ResponsesProviderConfig {
 pub struct ResponsesClient<P: ResponsesProviderConfig> {
     pub config: P,
     client: reqwest::Client,
-}
-
-/// Guard for tracking tool call processing limits and preventing infinite loops
-#[derive(Debug, Clone)]
-pub struct ToolCallingGuard {
-    /// Maximum number of iterations allowed in the tool calling loop
-    pub max_iterations: u32,
-    /// Timeout duration for the entire tool calling loop
-    pub timeout: Duration,
-    /// Current iteration count
-    current_iteration: u32,
-}
-
-impl ToolCallingGuard {
-    /// Create a new ToolCallingGuard with default limits
-    pub fn new() -> Self {
-        Self {
-            max_iterations: 50,
-            timeout: Duration::from_secs(300), // 5 minutes default
-            current_iteration: 0,
-        }
-    }
-
-    /// Create a new ToolCallingGuard with custom limits
-    pub fn with_limits(max_iterations: u32, timeout: Duration) -> Self {
-        Self {
-            max_iterations,
-            timeout,
-            current_iteration: 0,
-        }
-    }
-
-    /// Increment iteration count and check if limit is exceeded
-    pub fn increment_iteration(&mut self) -> Result<(), LlmError> {
-        self.current_iteration = self.current_iteration.saturating_add(1);
-        if self.current_iteration > self.max_iterations {
-            return Err(LlmError::ToolCallIterationLimit {
-                limit: self.max_iterations,
-            });
-        }
-        Ok(())
-    }
-
-    /// Get current iteration count
-    pub fn current_iteration(&self) -> u32 {
-        self.current_iteration
-    }
-}
-
-impl Default for ToolCallingGuard {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl<P: ResponsesProviderConfig> ResponsesClient<P> {

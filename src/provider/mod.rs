@@ -5,26 +5,6 @@ pub(crate) mod openrouter;
 pub use openai::{OpenAiClient, OpenAiConfig};
 pub use openrouter::{OpenRouterClient, OpenRouterConfig};
 
-use std::time::Duration;
-
-/// Configuration for tool calling behavior and limits
-#[derive(Debug, Clone)]
-pub struct ToolCallingConfig {
-    /// Maximum number of iterations in tool calling loop (default: 50)
-    pub max_iterations: u32,
-    /// Timeout for tool calling loop (default: 5 minutes)
-    pub timeout: Duration,
-}
-
-impl Default for ToolCallingConfig {
-    fn default() -> Self {
-        Self {
-            max_iterations: 50,
-            timeout: Duration::from_secs(300),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provider {
     OpenAI,
