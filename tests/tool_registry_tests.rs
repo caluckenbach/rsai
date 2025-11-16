@@ -1,23 +1,53 @@
-use async_trait::async_trait;
-use rsai::{LlmError, Tool, ToolCall, ToolFunction, ToolRegistry};
+use rsai::{
+    tool, BoxFuture, LlmError, Tool, ToolCall, ToolFunction, ToolRegistry,
+};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 
-// Mock tool implementations for testing
-struct TestToolA;
-#[async_trait]
-impl ToolFunction for TestToolA {
+#[tool]
+/// Deterministic tool A that returns a static payload.
+/// input: Arbitrary string payload echoed for testing.
+fn test_tool_a(input: String) -> serde_json::Value {
+    let _ = input;
+    json!({ "result": "success_a" })
+}
+
+#[tool]
+/// Deterministic tool B that simulates async work.
+/// value: Numeric value passed from the caller.
+async fn test_tool_b(value: f64) -> serde_json::Value {
+    let _ = value;
+    sleep(Duration::from_millis(1)).await;
+    json!({ "result": "success_b" })
+}
+
+fn tool_a() -> Arc<dyn ToolFunction> {
+    Arc::new(TestToolATool)
+}
+
+fn tool_b() -> Arc<dyn ToolFunction> {
+    Arc::new(TestToolBTool)
+}
+
+struct AlternateToolA;
+
+impl ToolFunction for AlternateToolA {
     fn schema(&self) -> Tool {
         Tool {
             name: "test_tool_a".to_string(),
-            description: Some("Test tool A".to_string()),
+            description: Some("Alternate implementation of tool A".to_string()),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "input": {"type": "string"}
-                }
+                    "input": {
+                        "type": "string",
+                        "description": "Arbitrary payload"
+                    }
+                },
+                "required": ["input"],
+                "additionalProperties": false
             }),
             strict: Some(true),
         }
@@ -26,57 +56,13 @@ impl ToolFunction for TestToolA {
     fn execute<'a>(
         &'a self,
         _params: serde_json::Value,
-    ) -> rsai::BoxFuture<'a, Result<serde_json::Value, LlmError>> {
-        Box::pin(async move { Ok(json!({"result": "success_a"})) })
+    ) -> BoxFuture<'a, Result<serde_json::Value, LlmError>> {
+        Box::pin(async move { Ok(json!({ "result": "alternate_success" })) })
     }
 }
 
-struct TestToolB;
-#[async_trait]
-impl ToolFunction for TestToolB {
-    fn schema(&self) -> Tool {
-        Tool {
-            name: "test_tool_b".to_string(),
-            description: Some("Test tool B".to_string()),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "value": {"type": "number"}
-                }
-            }),
-            strict: Some(false),
-        }
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _params: serde_json::Value,
-    ) -> rsai::BoxFuture<'a, Result<serde_json::Value, LlmError>> {
-        Box::pin(async move { Ok(json!({"result": "success_b"})) })
-    }
-}
-
-struct TestToolC;
-#[async_trait]
-impl ToolFunction for TestToolC {
-    fn schema(&self) -> Tool {
-        Tool {
-            name: "test_tool_a".to_string(), // Same name as TestToolA
-            description: Some("Test tool C - has same name as A".to_string()),
-            parameters: json!({
-                "type": "object",
-                "properties": {}
-            }),
-            strict: Some(true),
-        }
-    }
-
-    fn execute<'a>(
-        &'a self,
-        _params: serde_json::Value,
-    ) -> rsai::BoxFuture<'a, Result<serde_json::Value, LlmError>> {
-        Box::pin(async move { Ok(json!({"result": "success_c"})) })
-    }
+fn alternate_tool_a() -> Arc<dyn ToolFunction> {
+    Arc::new(AlternateToolA)
 }
 
 // ============================================================================
@@ -86,13 +72,11 @@ impl ToolFunction for TestToolC {
 #[tokio::test]
 async fn test_registration() {
     let registry = ToolRegistry::new();
-    let tool = Arc::new(TestToolA);
+    let tool = tool_a();
 
-    // Successful tool registration
     let result = registry.register(tool);
     assert!(result.is_ok(), "Tool registration should succeed");
 
-    // Verify tool was registered by checking schemas
     let schemas = registry.get_schemas().expect("Failed to get schemas");
     assert_eq!(schemas.len(), 1);
     assert_eq!(schemas[0].name, "test_tool_a");
@@ -101,19 +85,13 @@ async fn test_registration() {
 #[tokio::test]
 async fn test_duplicate_detection() {
     let registry = ToolRegistry::new();
-    let tool_a = Arc::new(TestToolA);
-    let tool_a_duplicate = Arc::new(TestToolA);
 
-    // First registration should succeed
-    let result1 = registry.register(tool_a);
-    assert!(result1.is_ok(), "First tool registration should succeed");
+    assert!(registry.register(tool_a()).is_ok());
 
-    // Second registration with same tool should fail
-    let result2 = registry.register(tool_a_duplicate);
-    assert!(result2.is_err(), "Duplicate tool registration should fail");
+    let result = registry.register(tool_a());
+    assert!(result.is_err(), "Duplicate tool registration should fail");
 
-    // Verify error type and message
-    if let Err(LlmError::ToolRegistration { tool_name, message }) = result2 {
+    if let Err(LlmError::ToolRegistration { tool_name, message }) = result {
         assert_eq!(tool_name, "test_tool_a");
         assert!(message.contains("already registered"));
     } else {
@@ -124,18 +102,13 @@ async fn test_duplicate_detection() {
 #[tokio::test]
 async fn test_different_tools_same_name() {
     let registry = ToolRegistry::new();
-    let tool_a = Arc::new(TestToolA);
 
-    // First registration should succeed
-    let result1 = registry.register(tool_a);
-    assert!(result1.is_ok(), "First tool registration should succeed");
+    assert!(registry.register(tool_a()).is_ok());
 
-    // Second registration with different tool but same name should fail
-    let result2 = registry.register(Arc::new(TestToolC));
-    assert!(result2.is_err(), "Registration with same name should fail");
+    let result = registry.register(alternate_tool_a());
+    assert!(result.is_err(), "Registration with same name should fail");
 
-    // Verify error details
-    if let Err(LlmError::ToolRegistration { tool_name, message }) = result2 {
+    if let Err(LlmError::ToolRegistration { tool_name, message }) = result {
         assert_eq!(tool_name, "test_tool_a");
         assert!(message.contains("already registered"));
     } else {
@@ -146,29 +119,16 @@ async fn test_different_tools_same_name() {
 #[tokio::test]
 async fn test_error_message_clarity() {
     let registry = ToolRegistry::new();
-    let tool_a = Arc::new(TestToolA);
-    let tool_a_duplicate = Arc::new(TestToolA);
 
-    registry.register(tool_a).unwrap();
-    let error = registry.register(tool_a_duplicate).unwrap_err();
+    registry.register(tool_a()).unwrap();
+    let error = registry.register(tool_a()).unwrap_err();
 
     match error {
         LlmError::ToolRegistration { tool_name, message } => {
-            // Error should contain tool name
             assert_eq!(tool_name, "test_tool_a");
-            // Error message should be clear and actionable
-            assert!(
-                message.contains("already"),
-                "Error should mention 'already'"
-            );
-            assert!(
-                message.contains("registered"),
-                "Error should mention 'registered'"
-            );
-            assert!(
-                message.contains("test_tool_a"),
-                "Error should include tool name in message"
-            );
+            assert!(message.contains("already"));
+            assert!(message.contains("registered"));
+            assert!(message.contains("test_tool_a"));
         }
         _ => panic!("Expected ToolRegistration error"),
     }
@@ -177,22 +137,17 @@ async fn test_error_message_clarity() {
 #[tokio::test]
 async fn test_overwrite_functionality() {
     let registry = ToolRegistry::new();
-    let tool_a = Arc::new(TestToolA);
 
-    // First registration
-    let result1 = registry.register(tool_a);
-    assert!(result1.is_ok());
+    assert!(registry.register(tool_a()).is_ok());
 
-    // Overwrite should succeed
-    let result2 = registry.overwrite(Arc::new(TestToolC));
-    assert!(result2.is_ok(), "Overwrite should succeed");
+    let result = registry.overwrite(alternate_tool_a());
+    assert!(result.is_ok(), "Overwrite should succeed");
 
-    // Verify the tool was overwritten
     let schemas = registry.get_schemas().expect("Failed to get schemas");
     assert_eq!(schemas.len(), 1);
     assert_eq!(
         schemas[0].description,
-        Some("Test tool C - has same name as A".to_string())
+        Some("Alternate implementation of tool A".to_string())
     );
 }
 
@@ -213,25 +168,18 @@ async fn test_concurrent_registration_different_tools() {
         .map(|i| {
             let registry_clone = Arc::clone(&registry);
             tokio::spawn(async move {
-                let tool: Arc<dyn ToolFunction> = match i % 2 {
-                    0 => Arc::new(TestToolA),
-                    _ => Arc::new(TestToolB),
-                };
+                let tool = if i % 2 == 0 { tool_a() } else { tool_b() };
                 registry_clone.register(tool)
             })
         })
         .collect();
 
-    let results: Vec<_> = futures::future::join_all(handles).await;
-
-    // Count successful registrations
+    let results = futures::future::join_all(handles).await;
     let success_count = results.iter().filter(|r| matches!(r, Ok(Ok(())))).count();
 
-    // Either 2 (both tools registered successfully) or all threads succeeded with different tools
-    // In practice, all should succeed since we're using different tools
     assert!(
         success_count >= 2,
-        "At least 2 different tools should be registered"
+        "At least two different tools should register successfully"
     );
 }
 
@@ -242,27 +190,18 @@ async fn test_concurrent_registration_same_tool() {
     let handles: Vec<_> = (0..SAME_TOOL_WORKERS)
         .map(|_| {
             let registry_clone = Arc::clone(&registry);
-            tokio::spawn(async move {
-                let tool: Arc<dyn ToolFunction> = Arc::new(TestToolA);
-                registry_clone.register(tool)
-            })
+            tokio::spawn(async move { registry_clone.register(tool_a()) })
         })
         .collect();
 
     let results = futures::future::join_all(handles).await;
-
-    // Count successful registrations
     let success_count = results.iter().filter(|r| matches!(r, Ok(Ok(())))).count();
-
-    // Count failed registrations due to duplicate
     let duplicate_error_count = results
         .iter()
         .filter(|r| matches!(r, Ok(Err(LlmError::ToolRegistration { .. }))))
         .count();
 
-    // Exactly one should succeed
     assert_eq!(success_count, 1, "Exactly one registration should succeed");
-    // All others should fail with duplicate error
     assert_eq!(
         duplicate_error_count,
         SAME_TOOL_WORKERS - 1,
@@ -274,67 +213,50 @@ async fn test_concurrent_registration_same_tool() {
 async fn test_concurrent_read_write() {
     let registry = Arc::new(ToolRegistry::new());
 
-    // Start registration task
     let registry_clone = Arc::clone(&registry);
     let register_handle = tokio::spawn(async move {
         sleep(Duration::from_millis(10)).await;
-        let tool: Arc<dyn ToolFunction> = Arc::new(TestToolA);
-        registry_clone.register(tool)
+        registry_clone.register(tool_a())
     });
 
-    // Start multiple read tasks that try to read during registration
     let mut read_handles = vec![];
     for _ in 0..READERS_DURING_WRITE {
         let registry_clone = Arc::clone(&registry);
-        let handle = tokio::spawn(async move {
+        read_handles.push(tokio::spawn(async move {
             sleep(Duration::from_millis(5)).await;
             registry_clone.get_schemas()
-        });
-        read_handles.push(handle);
+        }));
     }
 
-    let register_result = register_handle.await.unwrap();
-    assert!(register_result.is_ok(), "Registration should succeed");
+    assert!(register_handle.await.unwrap().is_ok());
 
     let read_results = futures::future::join_all(read_handles).await;
-
-    // All reads should succeed (readers don't block readers)
     for result in read_results {
-        let schema_result = result.unwrap();
-        assert!(schema_result.is_ok());
+        assert!(result.unwrap().is_ok());
     }
 }
 
 #[tokio::test]
 async fn test_concurrent_reads_during_registration() {
     let registry = Arc::new(ToolRegistry::new());
+    registry.register(tool_a()).unwrap();
 
-    // Pre-register a tool
-    {
-        registry.register(Arc::new(TestToolA)).unwrap();
-    }
-
-    // Start multiple concurrent reads
     let mut read_handles = vec![];
     for _ in 0..READERS_DURING_REGISTRATION {
         let registry_clone = Arc::clone(&registry);
-        let handle = tokio::spawn(async move { registry_clone.get_schemas() });
-        read_handles.push(handle);
+        read_handles.push(tokio::spawn(async move { registry_clone.get_schemas() }));
     }
 
-    // While reads are happening, try to write
-    let write_handle = tokio::spawn(async move { registry.register(Arc::new(TestToolB)) });
+    let registry_clone = Arc::clone(&registry);
+    let write_handle = tokio::spawn(async move { registry_clone.register(tool_b()) });
 
     let read_results = futures::future::join_all(read_handles).await;
     let write_result = write_handle.await.unwrap();
 
-    // All reads should succeed and see consistent state
     for result in read_results {
         let schemas = result.unwrap().unwrap();
-        assert!(!schemas.is_empty()); // Should see at least the first tool
+        assert!(!schemas.is_empty());
     }
-
-    // Write should succeed
     assert!(write_result.is_ok());
 }
 
@@ -346,30 +268,22 @@ async fn test_high_concurrency_stress_test() {
         .map(|i| {
             let registry_clone = Arc::clone(&registry);
             tokio::spawn(async move {
-                // Alternate between tool A and B
-                let tool: Arc<dyn ToolFunction> = match i % 2 {
-                    0 => Arc::new(TestToolA),
-                    _ => Arc::new(TestToolB),
-                };
+                let tool = if i % 2 == 0 { tool_a() } else { tool_b() };
                 registry_clone.register(tool)
             })
         })
         .collect();
 
     let results = futures::future::join_all(handles).await;
-
-    // Count successful registrations
     let success_count = results.iter().filter(|r| matches!(r, Ok(Ok(())))).count();
 
-    // With 100 threads and 2 unique tools, we should have exactly 2 successes
     assert_eq!(
         success_count, 2,
-        "Exactly 2 registrations should succeed (one for each tool)"
+        "Exactly two unique tools should be registered"
     );
 
-    // Verify final state
     let schemas = registry.get_schemas().unwrap();
-    assert_eq!(schemas.len(), 2, "Should have exactly 2 tools registered");
+    assert_eq!(schemas.len(), 2);
 }
 
 // ============================================================================
@@ -379,14 +293,10 @@ async fn test_high_concurrency_stress_test() {
 #[tokio::test]
 async fn test_register_same_tool_twice() {
     let registry = ToolRegistry::new();
-    let tool_a = Arc::new(TestToolA);
-    let tool_a_clone = Arc::new(TestToolA);
 
-    // First registration succeeds
-    assert!(registry.register(tool_a).is_ok());
+    assert!(registry.register(tool_a()).is_ok());
 
-    // Second registration fails
-    let result = registry.register(tool_a_clone);
+    let result = registry.register(tool_a());
     assert!(result.is_err());
 
     if let Err(LlmError::ToolRegistration { message, .. }) = result {
@@ -403,22 +313,17 @@ async fn test_register_same_tool_twice() {
 #[tokio::test]
 async fn test_tool_execution_after_registration() {
     let registry = ToolRegistry::new();
-    let tool = Arc::new(TestToolA);
-
-    registry.register(tool).unwrap();
+    registry.register(tool_a()).unwrap();
 
     let tool_call = ToolCall {
         id: "test_id".to_string(),
         call_id: "call_123".to_string(),
         name: "test_tool_a".to_string(),
-        arguments: json!({"input": "test data"}),
+        arguments: json!({ "input": "test data" }),
     };
 
-    let result = registry.execute(&tool_call).await;
-    assert!(result.is_ok());
-
-    let output = result.unwrap();
-    assert_eq!(output["result"], "success_a");
+    let result = registry.execute(&tool_call).await.unwrap();
+    assert_eq!(result["result"], "success_a");
 }
 
 #[tokio::test]
@@ -449,17 +354,15 @@ async fn test_tool_not_found_error() {
 #[tokio::test]
 async fn test_get_schemas_empty_registry() {
     let registry = ToolRegistry::new();
-
-    let schemas = registry.get_schemas().unwrap();
-    assert_eq!(schemas.len(), 0);
+    assert_eq!(registry.get_schemas().unwrap().len(), 0);
 }
 
 #[tokio::test]
 async fn test_get_schemas_multiple_tools() {
     let registry = ToolRegistry::new();
 
-    registry.register(Arc::new(TestToolA)).unwrap();
-    registry.register(Arc::new(TestToolB)).unwrap();
+    registry.register(tool_a()).unwrap();
+    registry.register(tool_b()).unwrap();
 
     let schemas = registry.get_schemas().unwrap();
     assert_eq!(schemas.len(), 2);
