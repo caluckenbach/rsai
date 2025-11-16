@@ -121,6 +121,31 @@ impl ToolRegistry {
         }
     }
 
+    /// Registers a new tool in the registry.
+    ///
+    /// # Arguments
+    /// * `tool` - The tool to register, wrapped in an Arc
+    ///
+    /// # Returns
+    /// * `Ok(())` if the tool was successfully registered
+    /// * `Err(LlmError::ToolRegistration)` if a tool with the same name already exists
+    ///
+    /// # Errors
+    /// This function will return an error if:
+    /// - A tool with the same name is already registered
+    /// - The registry's write lock is poisoned (indicates a panic in another thread)
+    ///
+    /// # Examples
+    /// ```
+    /// let registry = ToolRegistry::new();
+    /// let tool = Arc::new(MyTool);
+    /// registry.register(tool)?;
+    /// ```
+    ///
+    /// # Thread Safety
+    /// This method is thread-safe. Multiple threads can register tools concurrently,
+    /// but attempting to register the same tool name from multiple threads will
+    /// result in only one success and the rest will return errors.
     pub fn register(&mut self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
         let schema = tool.schema();
         let schema_name = schema.name.clone();
@@ -159,14 +184,25 @@ impl ToolRegistry {
         Ok(())
     }
 
-    pub fn get_schemas(&self) -> Vec<Tool> {
-        let r_tools = self.tools.read().expect("Failed to acquire read lock.");
-        r_tools.values().map(|tool| tool.schema()).collect()
+    pub fn get_schemas(&self) -> Result<Vec<Tool>, LlmError> {
+        let r_tools = self
+            .tools
+            .read()
+            .map_err(|_| LlmError::ToolRegistryAccess {
+                message: "Failed to acquire read lock (lock poisoned)".to_string(),
+            })?;
+        let schema = r_tools.values().map(|tool| tool.schema()).collect();
+        Ok(schema)
     }
 
     pub async fn execute(&self, tool_call: &ToolCall) -> Result<serde_json::Value, LlmError> {
         let tool = {
-            let r_tools = self.tools.read().expect("Failed ot acquire read lock.");
+            let r_tools = self
+                .tools
+                .read()
+                .map_err(|_| LlmError::ToolRegistryAccess {
+                    message: "Failed to acquire read lock (lock poisoned)".to_string(),
+                })?;
             r_tools.get(&tool_call.name).cloned()
         };
 
@@ -191,7 +227,7 @@ pub struct ToolSet {
 }
 
 impl ToolSet {
-    pub fn tools(&self) -> Vec<Tool> {
+    pub fn tools(&self) -> Result<Vec<Tool>, LlmError> {
         self.registry.get_schemas()
     }
 }

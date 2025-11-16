@@ -9,7 +9,7 @@ use super::{
     traits::LlmProvider,
     types::{
         ConversationMessage, GenerationConfig, Message, StructuredRequest, StructuredResponse,
-        Tool, ToolChoice, ToolConfig, ToolRegistry,
+        ToolChoice, ToolConfig, ToolRegistry,
     },
 };
 
@@ -37,7 +37,6 @@ struct BuilderFields {
     messages: Option<Vec<Message>>,
 
     // Tool configuration
-    tools: Option<Box<[Tool]>>,
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
     tool_registry: Option<ToolRegistry>,
@@ -55,7 +54,6 @@ impl BuilderFields {
             api_key: None,
             model: None,
             messages: None,
-            tools: None,
             tool_choice: None,
             parallel_tool_calls: None,
             tool_registry: None,
@@ -218,6 +216,15 @@ impl<State: private::Completable> LlmBuilder<State> {
         let model_string = model.to_string();
         let messages = messages.to_vec();
 
+        // Deferred error handling for tool registry errors in case of a poisoned lock.
+        let tool_schemas = self
+            .fields
+            .tool_registry
+            .as_ref()
+            .map(|registry| registry.get_schemas())
+            .transpose()?
+            .map(|tools| tools.into_boxed_slice());
+
         match provider {
             Provider::OpenAI => {
                 let conversation_messages: Vec<ConversationMessage> = messages
@@ -229,7 +236,7 @@ impl<State: private::Completable> LlmBuilder<State> {
                     model: model_string,
                     messages: conversation_messages,
                     tool_config: Some(ToolConfig {
-                        tools: self.fields.tools.clone(),
+                        tools: tool_schemas.clone(),
                         tool_choice: self.fields.tool_choice.clone(),
                         parallel_tool_calls: self.fields.parallel_tool_calls,
                     }),
@@ -254,7 +261,7 @@ impl<State: private::Completable> LlmBuilder<State> {
                     model: model_string,
                     messages: conversation_messages,
                     tool_config: Some(ToolConfig {
-                        tools: self.fields.tools.clone(),
+                        tools: tool_schemas.clone(),
                         tool_choice: self.fields.tool_choice.clone(),
                         parallel_tool_calls: self.fields.parallel_tool_calls,
                     }),
@@ -279,7 +286,6 @@ impl LlmBuilder<private::MessagesSet> {
     ///
     /// By default parallel tool calling is enabled. This can be changed by calling `parallel_tool_calls` with `false`.
     pub fn tools(mut self, toolset: super::types::ToolSet) -> LlmBuilder<private::ToolsSet> {
-        self.fields.tools = Some(toolset.tools().into_boxed_slice());
         self.fields.parallel_tool_calls = Some(true);
         self.fields.tool_registry = Some(toolset.registry);
         self.transition_state()
