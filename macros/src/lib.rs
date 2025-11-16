@@ -289,7 +289,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// use std::sync::Arc;
 ///
 /// {
-///     let mut registry = ToolRegistry::new();
+///     let registry = ToolRegistry::new();
 ///     // Note: FunctionName1Tool and FunctionName2Tool would be created by the #[tool] macro
 ///     // registry.register(FunctionName1Tool);
 ///     // registry.register(FunctionName2Tool);
