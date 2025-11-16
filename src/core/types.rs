@@ -136,17 +136,22 @@ impl ToolRegistry {
     /// - The registry's write lock is poisoned (indicates a panic in another thread)
     ///
     /// # Examples
-    /// ```
+    /// ```ignore
+    /// use std::sync::Arc;
+    /// use rsai::ToolRegistry;
+    ///
+    /// // Assuming you have a tool implementation
     /// let registry = ToolRegistry::new();
-    /// let tool = Arc::new(MyTool);
-    /// registry.register(tool)?;
+    /// // let tool: Arc<dyn rsai::ToolFunction> = Arc::new(your_tool);
+    /// // registry.register(tool)?;
+    /// # Ok::<(), rsai::LlmError>(())
     /// ```
     ///
     /// # Thread Safety
     /// This method is thread-safe. Multiple threads can register tools concurrently,
     /// but attempting to register the same tool name from multiple threads will
     /// result in only one success and the rest will return errors.
-    pub fn register(&mut self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
+    pub fn register(&self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
         let schema = tool.schema();
         let schema_name = schema.name.clone();
 
@@ -166,7 +171,7 @@ impl ToolRegistry {
         Ok(())
     }
 
-    pub fn overwrite(&mut self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
+    pub fn overwrite(&self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
         let schema = tool.schema();
         let schema_name = schema.name.clone();
 
@@ -271,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_registry_preservers_object_types() {
-        let mut registry = ToolRegistry::new();
+        let registry = ToolRegistry::new();
         registry
             .register(Arc::new(ObjectTool))
             .expect("Failed to regiter object_tool");

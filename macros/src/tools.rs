@@ -62,7 +62,7 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
         {
             use rsai::{Tool, ToolChoice, ToolFunction, ToolRegistry, ToolSet};
 
-            let mut registry = ToolRegistry::new();
+            let registry = ToolRegistry::new();
             #(
                 registry.register(std::sync::Arc::new(#wrapper_names))
                 .expect(&format!("Failed to register tool: {}", stringify!(#wrapper_names)));
