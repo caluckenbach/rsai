@@ -121,30 +121,52 @@ impl ToolRegistry {
         }
     }
 
-    pub fn register(&mut self, tool: Arc<dyn ToolFunction>) {
+    pub fn register(&mut self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
         let schema = tool.schema();
-        let mut w_tools = self.tools.write().unwrap();
+        let schema_name = schema.name.clone();
+
+        let mut w_tools = self.tools.write().map_err(|_| LlmError::ToolRegistration {
+            tool_name: schema_name.clone(),
+            message: "Failed to acquire write lock on tool registry".to_string(),
+        })?;
+
+        if w_tools.contains_key(&schema.name) {
+            return Err(LlmError::ToolRegistration {
+                tool_name: schema.name.clone(),
+                message: format!("Tool {} already registered", schema.name),
+            });
+        }
+
         w_tools.insert(schema.name, tool);
+        Ok(())
     }
 
-    pub fn overwrite(&mut self, tool: Arc<dyn ToolFunction>) {
+    pub fn overwrite(&mut self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
         let schema = tool.schema();
-        let mut w_tools = self.tools.write().unwrap();
+        let schema_name = schema.name.clone();
+
+        let mut w_tools = self.tools.write().map_err(|_| LlmError::ToolRegistration {
+            tool_name: schema_name.clone(),
+            message: "Failed to acquire write lock on tool registry".to_string(),
+        })?;
+
         let overwritten_tool = w_tools.insert(schema.name, tool);
 
         if overwritten_tool.is_some() {
-            // Log warning
+            // TODO: Log warning
         }
+
+        Ok(())
     }
 
     pub fn get_schemas(&self) -> Vec<Tool> {
-        let r_tools = self.tools.read().unwrap();
+        let r_tools = self.tools.read().expect("Failed to acquire read lock.");
         r_tools.values().map(|tool| tool.schema()).collect()
     }
 
     pub async fn execute(&self, tool_call: &ToolCall) -> Result<serde_json::Value, LlmError> {
         let tool = {
-            let r_tools = self.tools.read().unwrap();
+            let r_tools = self.tools.read().expect("Failed ot acquire read lock.");
             r_tools.get(&tool_call.name).cloned()
         };
 
@@ -214,7 +236,9 @@ mod tests {
     #[tokio::test]
     async fn test_tool_registry_preservers_object_types() {
         let mut registry = ToolRegistry::new();
-        registry.register(Arc::new(ObjectTool));
+        registry
+            .register(Arc::new(ObjectTool))
+            .expect("Failed to regiter object_tool");
 
         let tool_call = ToolCall {
             id: "test_Id".to_string(),
