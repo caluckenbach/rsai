@@ -28,7 +28,9 @@ mod tests {
         let toolset = toolset![get_weather];
 
         // Basic assertions to verify the structure works
-        let tools = toolset.tools();
+        let tools = toolset
+            .tools()
+            .expect("toolset macro should expose generated tools");
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0].name, "get_weather");
         assert!(tools[0].description.is_some());
@@ -39,7 +41,9 @@ mod tests {
         // Test with multiple tools
         let toolset = toolset![get_weather, calculate_distance];
 
-        let tools = toolset.tools();
+        let tools = toolset
+            .tools()
+            .expect("toolset macro should expose generated tools");
         assert_eq!(tools.len(), 2);
 
         let tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
@@ -52,7 +56,10 @@ mod tests {
         let toolset = toolset![get_weather, calculate_distance];
 
         // Test that registry has correct tools
-        let schemas = toolset.registry.get_schemas();
+        let schemas = toolset
+            .registry
+            .get_schemas()
+            .expect("tool registry should return schemas");
         assert_eq!(schemas.len(), 2);
 
         // Verify schema names match
@@ -64,7 +71,10 @@ mod tests {
     #[test]
     fn test_tool_parameter_schemas_in_registry() {
         let toolset = toolset![get_weather];
-        let schemas = toolset.registry.get_schemas();
+        let schemas = toolset
+            .registry
+            .get_schemas()
+            .expect("tool registry should return schemas");
 
         assert_eq!(schemas.len(), 1);
         let weather_schema = &schemas[0];
@@ -159,9 +169,15 @@ mod tests {
         // We can't directly test the enum without exposing it, but we can verify
         // the toolset structure that depends on it works correctly
 
-        let tools = toolset.tools();
+        let tools = toolset
+            .tools()
+            .expect("toolset macro should expose generated tools");
         assert_eq!(tools.len(), 2);
-        assert_eq!(toolset.registry.get_schemas().len(), 2);
+        let schemas = toolset
+            .registry
+            .get_schemas()
+            .expect("tool registry should return schemas");
+        assert_eq!(schemas.len(), 2);
     }
 
     #[tokio::test]
@@ -169,7 +185,10 @@ mod tests {
         let toolset = toolset![get_weather, calculate_distance];
 
         // Test complete workflow: schema -> call -> execution
-        let schemas = toolset.registry.get_schemas();
+        let schemas = toolset
+            .registry
+            .get_schemas()
+            .expect("tool registry should return schemas");
         assert_eq!(schemas.len(), 2);
 
         // Find weather tool schema
