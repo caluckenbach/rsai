@@ -243,7 +243,13 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 ///
 /// let single_tool = toolset![get_weather];
-/// assert_eq!(single_tool.tools().len(), 1);
+/// assert_eq!(
+///     single_tool
+///         .tools()
+///         .expect("toolset should contain the get_weather tool")
+///         .len(),
+///     1
+/// );
 /// ```
 ///
 /// ## Many Tools
@@ -274,7 +280,13 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// }
 ///
 /// let tools = toolset![send_email, get_user, create_file];
-/// assert_eq!(tools.tools().len(), 3);
+/// assert_eq!(
+///     tools
+///         .tools()
+///         .expect("toolset should contain all registered tools")
+///         .len(),
+///     3
+/// );
 /// ```
 ///
 /// # Generated Code
