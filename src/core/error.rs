@@ -47,6 +47,9 @@ pub enum LlmError {
     #[error("Tool not found: {0}")]
     ToolNotFound(String),
 
+    #[error("Tool registry access failed: {message}")]
+    ToolRegistryAccess { message: String },
+
     #[error("Tool call iteration limit exceeded: {limit} iterations")]
     ToolCallIterationLimit { limit: u32 },
 
