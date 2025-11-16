@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {
@@ -111,27 +111,44 @@ pub struct ResponseMetadata {
 }
 
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn ToolFunction>>,
+    tools: Arc<RwLock<HashMap<String, Arc<dyn ToolFunction>>>>,
 }
 
 impl ToolRegistry {
     pub fn new() -> Self {
         Self {
-            tools: HashMap::new(),
+            tools: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
     pub fn register(&mut self, tool: Arc<dyn ToolFunction>) {
         let schema = tool.schema();
-        self.tools.insert(schema.name, tool);
+        let mut w_tools = self.tools.write().unwrap();
+        w_tools.insert(schema.name, tool);
+    }
+
+    pub fn overwrite(&mut self, tool: Arc<dyn ToolFunction>) {
+        let schema = tool.schema();
+        let mut w_tools = self.tools.write().unwrap();
+        let overwritten_tool = w_tools.insert(schema.name, tool);
+
+        if overwritten_tool.is_some() {
+            // Log warning
+        }
     }
 
     pub fn get_schemas(&self) -> Vec<Tool> {
-        self.tools.values().map(|tool| tool.schema()).collect()
+        let r_tools = self.tools.read().unwrap();
+        r_tools.values().map(|tool| tool.schema()).collect()
     }
 
     pub async fn execute(&self, tool_call: &ToolCall) -> Result<serde_json::Value, LlmError> {
-        if let Some(tool) = self.tools.get(&tool_call.name) {
+        let tool = {
+            let r_tools = self.tools.read().unwrap();
+            r_tools.get(&tool_call.name).cloned()
+        };
+
+        if let Some(tool) = tool {
             tool.execute(tool_call.arguments.clone()).await
         } else {
             Err(LlmError::ToolNotFound(tool_call.name.clone()))
