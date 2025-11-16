@@ -64,7 +64,8 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
 
             let mut registry = ToolRegistry::new();
             #(
-                registry.register(std::sync::Arc::new(#wrapper_names));
+                registry.register(std::sync::Arc::new(#wrapper_names))
+                .expect(&format!("Failed to register tool: {}", stringify!(#wrapper_names)));
             )*
 
             ToolSet {
