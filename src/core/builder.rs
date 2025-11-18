@@ -113,6 +113,10 @@ impl<State> LlmBuilder<State> {
     pub(crate) fn get_api_key(&self) -> Option<&str> {
         self.fields.api_key.as_deref()
     }
+
+    pub(crate) fn get_http_config(&self) -> Option<&HttpClientConfig> {
+        self.fields.http_client_config.as_ref()
+    }
 }
 
 /// Configuration for API key source
