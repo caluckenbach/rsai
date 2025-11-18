@@ -37,18 +37,23 @@ tokio-stream = "0.1.17"
 [dev-dependencies]
 dotenv = "0.15.0"
 
-[[example]]
-name = "structured-generation"
-path = "examples/structured-generation/main.rs"
 
 [[example]]
 name = "function-calling"
-path = "examples/function-calling/main.rs"
+path = "examples/function_calling.rs"
 
 [[example]]
 name = "generation-config"
-path = "examples/generation-config/main.rs"
+path = "examples/generation_config.rs"
+
+[[example]]
+name = "http-config"
+path = "examples/http_config.rs"
 
 [[example]]
 name = "openrouter"
-path = "examples/openrouter/main.rs"
+path = "examples/openrouter.rs"
+
+[[example]]
+name = "structured-generation"
+path = "examples/structured_generation.rs"
