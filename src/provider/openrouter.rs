@@ -12,7 +12,7 @@
 //! unused ones with `#[allow(dead_code)]` rather than omitting them.
 
 use crate::provider::constants::openrouter;
-use crate::responses::{ResponsesClient, ResponsesProviderConfig};
+use crate::responses::{HttpClientConfig, ResponsesClient, ResponsesProviderConfig};
 
 use crate::core::{
     LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolCallingConfig,
@@ -26,6 +26,7 @@ pub struct OpenRouterConfig {
     pub base_url: String,
     pub http_referer: Option<String>,
     pub x_title: Option<String>,
+    pub http_config: HttpClientConfig,
     /// Configuration for tool calling limits
     pub tool_calling_config: Option<ToolCallingConfig>,
 }
@@ -38,11 +39,17 @@ impl OpenRouterConfig {
             http_referer: None,
             x_title: None,
             tool_calling_config: Some(ToolCallingConfig::default()),
+            http_config: HttpClientConfig::default(),
         }
     }
 
     pub fn with_base_url(mut self, base_url: String) -> Self {
         self.base_url = base_url;
+        self
+    }
+
+    pub fn with_http_config(mut self, config: HttpClientConfig) -> Self {
+        self.http_config = config;
         self
     }
 
@@ -103,6 +110,10 @@ impl ResponsesProviderConfig for OpenRouterConfig {
 
         headers
     }
+
+    fn http_config(&self) -> HttpClientConfig {
+        self.http_config.clone()
+    }
 }
 
 impl OpenRouterConfig {
@@ -129,6 +140,7 @@ impl OpenRouterClient {
         let current_api_key = &self.responses_client.config.api_key;
         let http_referer = self.responses_client.config.http_referer.clone();
         let x_title = self.responses_client.config.x_title.clone();
+        let http_config = self.responses_client.config.http_config.clone();
 
         let new_config = OpenRouterConfig {
             api_key: current_api_key.clone(),
@@ -136,6 +148,7 @@ impl OpenRouterClient {
             http_referer,
             x_title,
             tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
+            http_config,
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -151,14 +164,12 @@ impl OpenRouterClient {
         self
     }
 
-    pub fn with_tool_calling_config(
-        mut self,
-        config: ToolCallingConfig,
-    ) -> Result<Self, LlmError> {
+    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Result<Self, LlmError> {
         let current_api_key = &self.responses_client.config.api_key;
         let base_url = &self.responses_client.config.base_url;
         let http_referer = self.responses_client.config.http_referer.clone();
         let x_title = self.responses_client.config.x_title.clone();
+        let http_config = self.responses_client.config.http_config.clone();
 
         let new_config = OpenRouterConfig {
             api_key: current_api_key.clone(),
@@ -166,6 +177,7 @@ impl OpenRouterClient {
             http_referer,
             x_title,
             tool_calling_config: Some(config),
+            http_config,
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -219,5 +231,15 @@ pub fn create_openrouter_client_from_builder<State>(
         .ok_or_else(|| LlmError::ProviderConfiguration("OPENROUTER_API_KEY not set.".to_string()))?
         .to_string();
 
-    OpenRouterClient::new(api_key)
+    let mut config = OpenRouterConfig::new(api_key);
+
+    if let Some(http_config) = &builder.get_http_config() {
+        config = config.with_http_config((*http_config).clone());
+    }
+
+    let client = ResponsesClient::new(config)?;
+
+    Ok(OpenRouterClient {
+        responses_client: client,
+    })
 }
