@@ -26,12 +26,12 @@ use serde::Deserialize;
 
 #[derive(Debug, Clone)]
 pub struct HttpClientConfig {
-    timeout: Duration,
-    max_retries: u32,
+    pub timeout: Duration,
+    pub max_retries: u32,
     /// This is the base duration for exponential backoff
-    initial_retry_delay: Duration,
+    pub initial_retry_delay: Duration,
     /// Cap on the backoff duration
-    max_retry_delay: Duration,
+    pub max_retry_delay: Duration,
 }
 
 impl Default for HttpClientConfig {
@@ -99,47 +99,97 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
     /// Make an API request to the responses endpoint
     pub async fn make_api_request(&self, request: Request) -> Result<Response, LlmError> {
+        let config = self.config.http_config();
+
         let url = format!("{}{}", self.config.base_url(), self.config.endpoint());
 
-        let mut req_builder = self.client.post(&url).json(&request);
+        let mut last_error: Option<LlmError> = None;
+        for attempt in 0..=config.max_retries {
+            // .send() consumes the builder, so we have to rebuild it every attempt.
+            let mut req_builder = self.client.post(&url).json(&request);
 
-        // Add authentication header
-        let (auth_name, auth_value) = self.config.auth_header();
-        req_builder = req_builder.header(&auth_name, auth_value);
+            // Add authentication header
+            let (auth_name, auth_value) = self.config.auth_header();
+            req_builder = req_builder.header(&auth_name, auth_value);
 
-        // Add extra headers
-        for (name, value) in self.config.extra_headers() {
-            req_builder = req_builder.header(&name, value);
+            // Add extra headers
+            for (name, value) in self.config.extra_headers() {
+                req_builder = req_builder.header(&name, value);
+            }
+
+            match req_builder.send().await {
+                Err(e) => {
+                    last_error = Some(LlmError::Network {
+                        message: format!(
+                            "Request failed (attempt {}/{}",
+                            attempt + 1,
+                            config.max_retries + 1
+                        ),
+                        source: Box::new(e),
+                    })
+                }
+                Ok(res) => {
+                    let status = res.status();
+
+                    // Success
+                    if status.is_success() {
+                        return res.json().await.map_err(|e| LlmError::Parse {
+                            message: "Failed to parse API response".to_string(),
+                            source: Box::new(e),
+                        });
+                    }
+
+                    let is_retryable = status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                        || status.is_server_error();
+                    let error_text = res
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| "Unknown error".to_string());
+
+                    if !is_retryable {
+                        // Fatal errors
+                        return Err(LlmError::Api {
+                            message: format!("Fatal API Error: {error_text}"),
+                            status_code: Some(status.as_u16()),
+                            source: None,
+                        });
+                    }
+
+                    // Retryable Error: Capture and continue
+                    last_error = Some(LlmError::Api {
+                        message: format!("Transient API error ({}): {}", status, error_text),
+                        status_code: Some(status.as_u16()),
+                        source: None,
+                    })
+                }
+            }
+
+            // Exponential backoff
+            if attempt < config.max_retries {
+                let base_delay =
+                    config.initial_retry_delay.as_millis() as f64 * 2_f64.powi(attempt as i32);
+
+                // +/- 10% Jitter from 0.9 to 1.1
+                let jitter_factor = rand::random::<f64>() * 0.2 + 0.9;
+                let delay_ms = (base_delay * jitter_factor) as u64;
+
+                // Cap delay
+                let delay = std::time::Duration::from_millis(delay_ms).min(config.max_retry_delay);
+
+                // TODO: Add tracing warning if request failed.
+
+                tokio::time::sleep(delay).await;
+            }
         }
 
-        let res = req_builder.send().await.map_err(|e| LlmError::Network {
-            message: "Failed to complete request".to_string(),
-            source: Box::new(e),
-        })?;
-
-        if !res.status().is_success() {
-            let status = res.status();
-            let error_text = res
-                .text()
-                .await
-                .map_err(|e| LlmError::Api {
-                    message: "Failed to get the response text".to_string(),
-                    status_code: Some(status.as_u16()),
-                    source: Some(Box::new(e)),
-                })?
-                .clone();
-
-            return Err(LlmError::Api {
-                message: format!("API returned error: {error_text}"),
-                status_code: Some(status.as_u16()),
-                source: None,
-            });
-        }
-
-        res.json().await.map_err(|e| LlmError::Parse {
-            message: "Failed to parse API response".to_string(),
-            source: Box::new(e),
-        })
+        Err(last_error.unwrap_or_else(|| LlmError::Api {
+            message: format!(
+                "Request failed after max retries ({}) with unknown error",
+                config.max_retries
+            ),
+            status_code: None,
+            source: None,
+        }))
     }
 
     /// Handle the complete tool calling loop until a final response is received

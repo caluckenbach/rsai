@@ -3,7 +3,7 @@ use serde_json::Value;
 
 use crate::responses::types::FunctionToolCall;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Request {
     pub model: String,
 
@@ -193,7 +193,7 @@ fn create_serializable_tool(tool: &Tool) -> SerializableTool {
     })
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Format {
     pub format: FormatType,
 }
@@ -212,7 +212,7 @@ pub struct FunctionToolCallOutput {
     pub r#type: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum FormatType {
     // TODO: remove this, once text input is supported
@@ -240,7 +240,7 @@ pub enum TextType {
     Text,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct JsonSchema {
     pub name: String,
 
@@ -250,7 +250,7 @@ pub struct JsonSchema {
     pub r#type: JsonSchemaType,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum JsonSchemaType {
     JsonSchema,
