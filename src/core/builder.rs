@@ -2,7 +2,10 @@ use std::{env, marker::PhantomData};
 
 use serde::de::Deserialize;
 
-use crate::provider::{Provider, openai, openrouter};
+use crate::{
+    provider::{Provider, openai, openrouter},
+    responses::HttpClientConfig,
+};
 
 use super::{
     error::LlmError,
@@ -32,6 +35,7 @@ struct BuilderFields {
     provider: Option<Provider>,
     api_key: Option<String>,
     model: Option<String>,
+    http_client_config: Option<HttpClientConfig>,
 
     // Request content
     messages: Option<Vec<Message>>,
@@ -60,6 +64,7 @@ impl BuilderFields {
             max_tokens: None,
             temperature: None,
             top_p: None,
+            http_client_config: None,
         }
     }
 
@@ -160,6 +165,21 @@ impl LlmBuilder<private::Configuring> {
 }
 
 impl<State: private::Completable> LlmBuilder<State> {
+    /// Set a custom timeout for the HTTP request.
+    /// This is a convenience method that modifies the HttpClientConfig.
+    pub fn timout(mut self, duration: std::time::Duration) -> Self {
+        let mut config = self.fields.http_client_config.unwrap_or_default();
+        config.timeout = duration;
+        self.fields.http_client_config = Some(config);
+        self
+    }
+
+    /// Set the full HTTP client configuration (retries, backoff, etc).
+    pub fn http_client_config(mut self, config: HttpClientConfig) -> Self {
+        self.fields.http_client_config = Some(config);
+        self
+    }
+
     /// Set the maximum number of tokens to generate.
     pub fn max_tokens(mut self, max_tokens: u32) -> Self {
         self.fields.max_tokens = Some(max_tokens);
