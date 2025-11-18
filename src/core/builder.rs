@@ -171,7 +171,7 @@ impl LlmBuilder<private::Configuring> {
 impl<State: private::Completable> LlmBuilder<State> {
     /// Set a custom timeout for the HTTP request.
     /// This is a convenience method that modifies the HttpClientConfig.
-    pub fn timout(mut self, duration: std::time::Duration) -> Self {
+    pub fn timeout(mut self, duration: std::time::Duration) -> Self {
         let mut config = self.fields.http_client_config.unwrap_or_default();
         config.timeout = duration;
         self.fields.http_client_config = Some(config);
