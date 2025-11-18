@@ -7,6 +7,8 @@
 //! - Serializing tools and generating JSON schemas
 //! - Parsing API responses back to core types
 
+use std::time::Duration;
+
 use crate::{
     Provider,
     core::{
@@ -21,6 +23,27 @@ use crate::{
 };
 use schemars::schema_for;
 use serde::Deserialize;
+
+#[derive(Debug, Clone)]
+pub struct HttpClientConfig {
+    timeout: Duration,
+    max_retries: u32,
+    /// This is the base duration for exponential backoff
+    initial_retry_delay: Duration,
+    /// Cap on the backoff duration
+    max_retry_delay: Duration,
+}
+
+impl Default for HttpClientConfig {
+    fn default() -> Self {
+        Self {
+            timeout: Duration::from_secs(60),
+            max_retries: 3,
+            initial_retry_delay: Duration::from_millis(500),
+            max_retry_delay: Duration::from_secs(10),
+        }
+    }
+}
 
 /// Configuration trait for providers that use the OpenAI-style responses API
 pub trait ResponsesProviderConfig {
@@ -40,6 +63,15 @@ pub trait ResponsesProviderConfig {
     fn extra_headers(&self) -> Vec<(String, String)> {
         Vec::new()
     }
+
+    /// Configuration for HTTP client resilience
+    fn http_config(&self) -> HttpClientConfig {
+        HttpClientConfig::default()
+    }
+
+    fn user_agent(&self) -> String {
+        format!("rsai/{}", env!("CARGO_PKG_VERSION"))
+    }
 }
 
 /// Shared client for providers using the OpenAI-style responses API
@@ -50,11 +82,19 @@ pub struct ResponsesClient<P: ResponsesProviderConfig> {
 
 impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     /// Create a new responses client with the given configuration
-    pub fn new(config: P) -> Self {
-        Self {
-            config,
-            client: reqwest::Client::new(),
-        }
+    pub fn new(config: P) -> Result<Self, LlmError> {
+        let http_config = config.http_config();
+        let user_agent = config.user_agent();
+
+        let client = reqwest::Client::builder()
+            .timeout(http_config.timeout)
+            .user_agent(user_agent)
+            .build()
+            .map_err(|e| {
+                LlmError::ProviderConfiguration(format!("Failed to build reqwest client: {e}"))
+            })?;
+
+        Ok(Self { config, client })
     }
 
     /// Make an API request to the responses endpoint

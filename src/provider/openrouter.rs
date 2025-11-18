@@ -117,14 +117,14 @@ pub struct OpenRouterClient {
 }
 
 impl OpenRouterClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String) -> Result<Self, LlmError> {
         let config = OpenRouterConfig::new(api_key);
-        Self {
-            responses_client: ResponsesClient::new(config),
-        }
+        Ok(Self {
+            responses_client: ResponsesClient::new(config)?,
+        })
     }
 
-    pub fn with_base_url(mut self, base_url: String) -> Self {
+    pub fn with_base_url(mut self, base_url: String) -> Result<Self, LlmError> {
         // Create a new config with the updated base_url using the current API key
         let current_api_key = &self.responses_client.config.api_key;
         let http_referer = self.responses_client.config.http_referer.clone();
@@ -137,8 +137,8 @@ impl OpenRouterClient {
             x_title,
             tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
         };
-        self.responses_client = ResponsesClient::new(new_config);
-        self
+        self.responses_client = ResponsesClient::new(new_config)?;
+        Ok(self)
     }
 
     pub fn with_http_referer(mut self, http_referer: String) -> Self {
@@ -151,7 +151,10 @@ impl OpenRouterClient {
         self
     }
 
-    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Self {
+    pub fn with_tool_calling_config(
+        mut self,
+        config: ToolCallingConfig,
+    ) -> Result<Self, LlmError> {
         let current_api_key = &self.responses_client.config.api_key;
         let base_url = &self.responses_client.config.base_url;
         let http_referer = self.responses_client.config.http_referer.clone();
@@ -164,8 +167,8 @@ impl OpenRouterClient {
             x_title,
             tool_calling_config: Some(config),
         };
-        self.responses_client = ResponsesClient::new(new_config);
-        self
+        self.responses_client = ResponsesClient::new(new_config)?;
+        Ok(self)
     }
 }
 
@@ -216,6 +219,5 @@ pub fn create_openrouter_client_from_builder<State>(
         .ok_or_else(|| LlmError::ProviderConfiguration("OPENROUTER_API_KEY not set.".to_string()))?
         .to_string();
 
-    let client = OpenRouterClient::new(api_key);
-    Ok(client)
+    OpenRouterClient::new(api_key)
 }

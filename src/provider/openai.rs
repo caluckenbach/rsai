@@ -89,14 +89,14 @@ pub struct OpenAiClient {
 }
 
 impl OpenAiClient {
-    pub fn new(api_key: String) -> Self {
+    pub fn new(api_key: String) -> Result<Self, LlmError> {
         let config = OpenAiConfig::new(api_key);
-        Self {
-            responses_client: ResponsesClient::new(config),
-        }
+        Ok(Self {
+            responses_client: ResponsesClient::new(config)?,
+        })
     }
 
-    pub fn with_base_url(mut self, base_url: String) -> Self {
+    pub fn with_base_url(mut self, base_url: String) -> Result<Self, LlmError> {
         // Create a new config with the updated base_url using the current API key
         let current_api_key = &self.responses_client.config.api_key;
         let new_config = OpenAiConfig {
@@ -104,11 +104,14 @@ impl OpenAiClient {
             base_url,
             tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
         };
-        self.responses_client = ResponsesClient::new(new_config);
-        self
+        self.responses_client = ResponsesClient::new(new_config)?;
+        Ok(self)
     }
 
-    pub fn with_tool_calling_config(mut self, config: ToolCallingConfig) -> Self {
+    pub fn with_tool_calling_config(
+        mut self,
+        config: ToolCallingConfig,
+    ) -> Result<Self, LlmError> {
         let current_api_key = &self.responses_client.config.api_key;
         let base_url = &self.responses_client.config.base_url;
         let new_config = OpenAiConfig {
@@ -116,8 +119,8 @@ impl OpenAiClient {
             base_url: base_url.clone(),
             tool_calling_config: Some(config),
         };
-        self.responses_client = ResponsesClient::new(new_config);
-        self
+        self.responses_client = ResponsesClient::new(new_config)?;
+        Ok(self)
     }
 }
 
@@ -168,6 +171,5 @@ pub fn create_openai_client_from_builder<State>(
         .ok_or_else(|| LlmError::ProviderConfiguration("OPENAI_API_KEY not set.".to_string()))?
         .to_string();
 
-    let client = OpenAiClient::new(api_key);
-    Ok(client)
+    OpenAiClient::new(api_key)
 }
