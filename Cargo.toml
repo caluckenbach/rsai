@@ -33,6 +33,7 @@ serde_json = { workspace = true }
 thiserror = "2.0.12"
 tokio = { version = "1.43.0", features = ["full"] }
 tokio-stream = "0.1.17"
+tracing = "0.1.41"
 
 [dev-dependencies]
 dotenv = "0.15.0"
