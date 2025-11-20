@@ -182,6 +182,20 @@ impl OpenRouterClient {
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
     }
+
+    pub fn with_http_config(mut self, config: HttpClientConfig) -> Result<Self, LlmError> {
+        let current_config = &self.responses_client.config;
+        let new_config = OpenRouterConfig {
+            api_key: current_config.api_key.clone(),
+            base_url: current_config.base_url.clone(),
+            http_referer: current_config.http_referer.clone(),
+            x_title: current_config.x_title.clone(),
+            tool_calling_config: current_config.tool_calling_config.clone(),
+            http_config: config,
+        };
+        self.responses_client = ResponsesClient::new(new_config)?;
+        Ok(self)
+    }
 }
 
 #[async_trait]

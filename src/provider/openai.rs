@@ -132,6 +132,21 @@ impl OpenAiClient {
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
     }
+
+    pub fn with_http_config(mut self, config: HttpClientConfig) -> Result<Self, LlmError> {
+        let current_api_key = &self.responses_client.config.api_key;
+        let base_url = &self.responses_client.config.base_url;
+        let tool_config = &self.responses_client.config.tool_calling_config;
+
+        let new_config = OpenAiConfig {
+            api_key: current_api_key.clone(),
+            base_url: base_url.clone(),
+            tool_calling_config: tool_config.clone(),
+            http_config: config,
+        };
+        self.responses_client = ResponsesClient::new(new_config)?;
+        Ok(self)
+    }
 }
 
 #[async_trait]
