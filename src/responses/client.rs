@@ -299,45 +299,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     where
         T: schemars::JsonSchema,
     {
-        let mut req = Request {
-            model: request.model.clone(),
-            input: responses_input.to_vec(),
-            text: create_format_for_type::<T>()?,
-            // Default fields
-            parallel_tool_calls: None,
-            temperature: None,
-            tools: None,
-            tool_choice: None,
-            instructions: None,
-            max_output_tokens: None,
-            max_tool_calls: None,
-            store: None,
-            top_logprobs: None,
-            top_p: None,
-            truncation: None,
-            user: None,
-        };
-
-        // Apply tool configuration if present
-        if let Some(tool_config) = &request.tool_config {
-            req.tools = tool_config.tools.as_ref().map(|tools| {
-                tools
-                    .iter()
-                    .map(crate::responses::create_function_tool)
-                    .collect::<Box<[crate::responses::Tool]>>()
-            });
-            req.tool_choice = tool_config.tool_choice.as_ref().map(|tc| tc.clone().into());
-            req.parallel_tool_calls = tool_config.parallel_tool_calls;
-        }
-
-        // Apply generation configuration if present
-        if let Some(gen_config) = &request.generation_config {
-            req.temperature = gen_config.temperature;
-            req.max_output_tokens = gen_config.max_tokens;
-            req.top_p = gen_config.top_p;
-        }
-
-        Ok(req)
+        build_request_payload::<T>(request, responses_input)
     }
 
     /// Extract function calls from API response
@@ -459,6 +421,54 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 }
 
+pub(crate) fn build_request_payload<T>(
+    request: &StructuredRequest,
+    responses_input: &[InputItem],
+) -> Result<Request, LlmError>
+where
+    T: schemars::JsonSchema,
+{
+    let mut req = Request {
+        model: request.model.clone(),
+        input: responses_input.to_vec(),
+        text: create_format_for_type::<T>()?,
+        // Default fields
+        parallel_tool_calls: None,
+        temperature: None,
+        tools: None,
+        tool_choice: None,
+        instructions: None,
+        max_output_tokens: None,
+        max_tool_calls: None,
+        store: None,
+        top_logprobs: None,
+        top_p: None,
+        truncation: None,
+        user: None,
+    };
+
+    // Apply tool configuration if present
+    if let Some(tool_config) = &request.tool_config {
+        req.tools = tool_config.tools.as_ref().map(|tools| {
+            tools
+                .iter()
+                .map(crate::responses::create_function_tool)
+                .collect::<Box<[crate::responses::Tool]>>()
+        });
+        req.tool_choice = tool_config.tool_choice.as_ref().map(|tc| tc.clone().into());
+        req.parallel_tool_calls = tool_config.parallel_tool_calls;
+    }
+
+    // Apply generation configuration if present
+    if let Some(gen_config) = &request.generation_config {
+        req.temperature = gen_config.temperature;
+        req.max_output_tokens = gen_config.max_tokens;
+        req.top_p = gen_config.top_p;
+    }
+
+    Ok(req)
+}
+
 /// Wrapper for non-object JSON Schema types (enums, strings, numbers, etc.)
 /// OpenAI's structured output API requires the root schema to be an object,
 /// so we wrap non-object types in an object with a "value" property.
@@ -538,14 +548,23 @@ pub(crate) fn create_format_for_type<T>() -> Result<Format, LlmError>
 where
     T: schemars::JsonSchema,
 {
-    let s = schema_for!(T);
+    let schema = schema_for!(T);
+    let schema_value = serde_json::to_value(&schema).map_err(|e| LlmError::Parse {
+        message: "Failed to build JSON Schema".to_string(),
+        source: Box::new(e),
+    })?;
+    create_format_from_value(schema_value)
+}
 
-    let obj = s.as_object().ok_or_else(|| LlmError::Provider {
+pub(crate) fn create_format_from_value(
+    mut schema_value: serde_json::Value,
+) -> Result<Format, LlmError> {
+    let schema_obj = schema_value.as_object().ok_or_else(|| LlmError::Provider {
         message: "Failed to build JSON Schema: root is not an object".to_string(),
         source: None,
     })?;
 
-    let schema_name = obj
+    let schema_name = schema_obj
         .get("title")
         .ok_or_else(|| LlmError::Provider {
             message: "Failed to build JSON Schema: Missing schema name".to_string(),
@@ -557,11 +576,6 @@ where
             source: None,
         })?
         .to_owned();
-
-    let mut schema_value = serde_json::to_value(&s).map_err(|e| LlmError::Parse {
-        message: "Failed to build JSON Schema".to_string(),
-        source: Box::new(e),
-    })?;
 
     let needs_wrapping = schema_value
         .get("type")
@@ -577,7 +591,7 @@ where
             },
             "required": ["value"],
             "additionalProperties": false
-        })
+        });
     }
 
     Ok(Format {
