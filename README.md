@@ -3,7 +3,9 @@
 ## Quick Start
 
 ```rust
-use rsai::{llm, Message, ChatRole, ApiKey, Provider, completion_schema};
+// Core builders now live under the `text` module.
+use rsai::{ApiKey, Provider};
+use rsai::text::{llm, Message, ChatRole, completion_schema};
 
 #[completion_schema]
 struct Analysis {

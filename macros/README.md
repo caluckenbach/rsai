@@ -238,7 +238,7 @@ Your tool functions can return any type that implements `Into<LlmError>`:
 
 ```rust
 use rsai_macros::tool;
-use rsai::LlmError;
+use rsai::text::LlmError;
 
 #[derive(Debug)]
 enum CustomError {
