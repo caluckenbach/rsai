@@ -4,10 +4,10 @@ use rsai::{
     ChatRole, ConversationMessage, LlmError, LlmProvider, Message, OpenAiClient, StructuredRequest,
     ToolCallingConfig, ToolChoice, ToolConfig, ToolSet, completion_schema, tool, toolset,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use wiremock::{
-    matchers::{method, path},
     Match, Mock, MockServer, Request as WiremockRequest, ResponseTemplate,
+    matchers::{method, path},
 };
 
 #[completion_schema]
@@ -117,16 +117,8 @@ async fn parallel_tool_calls_submit_all_results_together() {
         .and(path("/v1/responses"))
         .and(BodyNotContains("function_call_output"))
         .respond_with(tool_call_response(vec![
-            function_call(
-                "call_sum",
-                "calculate_sum",
-                json!({ "a": 4, "b": 5 }),
-            ),
-            function_call(
-                "call_product",
-                "multiply_values",
-                json!({ "a": 2, "b": 3 }),
-            ),
+            function_call("call_sum", "calculate_sum", json!({ "a": 4, "b": 5 })),
+            function_call("call_product", "multiply_values", json!({ "a": 2, "b": 3 })),
         ]))
         .mount(&server)
         .await;
@@ -228,10 +220,7 @@ async fn tool_call_timeout_triggers_error() {
 
     Mock::given(method("POST"))
         .and(path("/v1/responses"))
-        .respond_with(
-            final_response(json!({ "sum": 42 }))
-                .set_delay(Duration::from_millis(200)),
-        )
+        .respond_with(final_response(json!({ "sum": 42 })).set_delay(Duration::from_millis(200)))
         .mount(&server)
         .await;
 
@@ -268,12 +257,7 @@ fn client_for(server: &MockServer, config: Option<ToolCallingConfig>) -> OpenAiC
 
 fn tool_config_for(toolset: &ToolSet, parallel: Option<bool>) -> ToolConfig {
     ToolConfig {
-        tools: Some(
-            toolset
-                .tools()
-                .expect("schemas")
-                .into_boxed_slice(),
-        ),
+        tools: Some(toolset.tools().expect("schemas").into_boxed_slice()),
         tool_choice: Some(ToolChoice::Auto),
         parallel_tool_calls: parallel,
     }
@@ -347,8 +331,5 @@ fn usage_payload() -> Value {
 fn parse_inputs(request: &WiremockRequest) -> Vec<Value> {
     let body: Value =
         serde_json::from_slice(&request.body).expect("request body should be valid json");
-    body["input"]
-        .as_array()
-        .expect("input array")
-        .clone()
+    body["input"].as_array().expect("input array").clone()
 }
