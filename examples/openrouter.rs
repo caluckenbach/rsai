@@ -8,7 +8,8 @@
 
 use dotenv::dotenv;
 
-use rsai::{ApiKey, ChatRole, Message, Provider, completion_schema, llm};
+use rsai::text::{ChatRole, Message, completion_schema, llm};
+use rsai::{ApiKey, Provider};
 
 #[completion_schema]
 struct Analysis {

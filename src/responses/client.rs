@@ -669,8 +669,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::completion_schema;
     use crate::core::{ChatRole, ConversationMessage, Message, StructuredRequest, ToolRegistry};
+    use crate::text::completion_schema;
     use std::time::Duration;
     use wiremock::{
         Mock, MockServer, ResponseTemplate,

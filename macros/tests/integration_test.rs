@@ -9,7 +9,7 @@ fn get_weather(_location: String) -> f64 {
 
 #[test]
 fn test_get_weather_tool_schema() {
-    use rsai::ToolFunction;
+    use rsai::text::ToolFunction;
     let tool_instance = GetWeatherTool;
     let tool = tool_instance.schema();
 
@@ -56,7 +56,7 @@ fn complex_function(param1: String, param2: Option<i32>, param3: bool) -> String
 
 #[test]
 fn test_complex_function_docstring_parsing() {
-    use rsai::ToolFunction;
+    use rsai::text::ToolFunction;
     let tool_instance = ComplexFunctionTool;
     let tool = tool_instance.schema();
 

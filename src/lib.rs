@@ -10,7 +10,8 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use rsai::{llm, Message, ChatRole, ApiKey, Provider, completion_schema};
+//! use rsai::{ApiKey, Provider};
+//! use rsai::text::{llm, Message, ChatRole, completion_schema};
 //!
 //! #[completion_schema]
 //! struct Analysis {
@@ -37,33 +38,44 @@ mod core;
 mod provider;
 mod responses;
 
-// Core types
-pub use core::{ChatRole, ConversationMessage, Message};
-pub use core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
-pub use core::{ToolCallingConfig, ToolCallingGuard};
+// The core module currently implements text-based LLM functionality.
+// We re-export it as `text` to align with future modules (image, audio, video).
+// Actual file system refactoring (renaming core/ -> text/) is deferred until
+// those modalities are added to minimize churn.
+pub mod text {
+    // Core types
+    pub use crate::core::{ChatRole, ConversationMessage, Message};
+    pub use crate::core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
+    pub use crate::core::{ToolCallingConfig, ToolCallingGuard};
 
-// Configuration types
-pub use core::{ApiKey, GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
+    // Configuration types
+    pub use crate::core::{GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
+
+    // Response types
+    pub use crate::core::{
+        LanguageModelUsage, ResponseMetadata, StructuredRequest, StructuredResponse,
+    };
+
+    // Async helpers
+    pub use crate::core::BoxFuture;
+
+    // Error handling
+    pub use crate::core::LlmError;
+    pub type Result<T> = std::result::Result<T, LlmError>;
+
+    // Gen AI request builders
+    pub use crate::core::llm;
+
+    // Traits
+    pub use crate::core::{LlmProvider, ToolFunction};
+
+    // Macros
+    pub use rsai_macros::{completion_schema, tool, toolset};
+}
+
+// Shared Configuration types
+pub use core::ApiKey;
 pub use responses::HttpClientConfig;
 
-// Response types
-pub use core::{LanguageModelUsage, ResponseMetadata, StructuredRequest, StructuredResponse};
-
-// Async helpers
-pub use core::BoxFuture;
-
-// Error handling
-pub use core::LlmError;
-pub type Result<T> = std::result::Result<T, LlmError>;
-
-// Gen AI request builders
-pub use core::llm;
-
-// Gen AI providers
+// Shared Providers
 pub use provider::{OpenAiClient, OpenAiConfig, OpenRouterClient, OpenRouterConfig, Provider};
-
-// Traits
-pub use core::{LlmProvider, ToolFunction};
-
-// Macros from `rsai-macros`
-pub use rsai_macros::{completion_schema, tool, toolset};

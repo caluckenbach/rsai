@@ -139,13 +139,13 @@ impl ToolRegistry {
     /// # Examples
     /// ```ignore
     /// use std::sync::Arc;
-    /// use rsai::ToolRegistry;
+    /// use rsai::text::ToolRegistry;
     ///
     /// // Assuming you have a tool implementation
     /// let registry = ToolRegistry::new();
-    /// // let tool: Arc<dyn rsai::ToolFunction> = Arc::new(your_tool);
+    /// // let tool: Arc<dyn rsai::text::ToolFunction> = Arc::new(your_tool);
     /// // registry.register(tool)?;
-    /// # Ok::<(), rsai::LlmError>(())
+    /// # Ok::<(), rsai::text::LlmError>(())
     /// ```
     ///
     /// # Thread Safety

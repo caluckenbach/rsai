@@ -1,4 +1,4 @@
-use rsai::tool;
+use rsai::text::tool;
 
 #[tool]
 /// Function with extra parameter in docstring

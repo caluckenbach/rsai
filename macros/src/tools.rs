@@ -60,7 +60,7 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
     // Generate the complete code with tools array and type-safe choice enum
     let expanded = quote! {
         {
-            use rsai::{Tool, ToolChoice, ToolFunction, ToolRegistry, ToolSet};
+            use rsai::text::{Tool, ToolChoice, ToolFunction, ToolRegistry, ToolSet};
 
             let registry = ToolRegistry::new();
             #(

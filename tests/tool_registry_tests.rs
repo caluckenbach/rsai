@@ -1,4 +1,4 @@
-use rsai::{BoxFuture, LlmError, Tool, ToolCall, ToolFunction, ToolRegistry, tool};
+use rsai::text::{BoxFuture, LlmError, Tool, ToolCall, ToolFunction, ToolRegistry, tool};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;

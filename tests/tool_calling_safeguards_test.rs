@@ -1,4 +1,5 @@
-use rsai::{LlmError, OpenAiConfig, OpenRouterConfig, ToolCallingConfig, ToolCallingGuard};
+use rsai::text::{LlmError, ToolCallingConfig, ToolCallingGuard};
+use rsai::{OpenAiConfig, OpenRouterConfig};
 use std::time::Duration;
 
 #[tokio::test]

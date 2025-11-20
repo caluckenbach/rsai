@@ -213,7 +213,8 @@ impl<State: private::Completable> LlmBuilder<State> {
     ///
     /// # Example
     /// ```no_run
-    /// # use rsai::{completion_schema, llm, Message, ChatRole, ApiKey, Provider};
+    /// # use rsai::{ApiKey, Provider};
+    /// # use rsai::text::{llm, Message, ChatRole, completion_schema};
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// #[completion_schema]
@@ -351,7 +352,8 @@ pub mod llm {
     ///
     /// # Example
     /// ```no_run
-    /// # use rsai::{llm, ApiKey, Provider};
+    /// # use rsai::{ApiKey, Provider};
+    /// # use rsai::text::llm;
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let builder = llm::with(Provider::OpenAI)

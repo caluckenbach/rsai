@@ -1,7 +1,8 @@
-use rsai::{
-    LlmError, OpenAiConfig, OpenRouterConfig, ToolCall, ToolCallingConfig, ToolChoice, ToolConfig,
-    ToolRegistry, completion_schema, tool, toolset,
+use rsai::text::{
+    LlmError, ToolCall, ToolCallingConfig, ToolChoice, ToolConfig, ToolRegistry, completion_schema,
+    tool, toolset,
 };
+use rsai::{OpenAiConfig, OpenRouterConfig};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;

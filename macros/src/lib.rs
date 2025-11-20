@@ -31,7 +31,7 @@
 //! }
 //!
 //! let tools = toolset![get_weather];
-//! // Use with rsai::llm builder...
+//! // Use with rsai::text::llm builder...
 //! ```
 
 use proc_macro::TokenStream;
@@ -40,7 +40,7 @@ use quote::quote;
 mod tool;
 mod tools;
 
-/// Attribute macro for types used with the `rsai::llm()::complete::<T>()` method.
+/// Attribute macro for types used with the `rsai::text::llm()::complete::<T>()` method.
 ///
 /// This macro automatically adds the necessary derives and attributes to make a struct
 /// suitable for structured responses. It ensures strict validation of
@@ -207,7 +207,7 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// Macro for creating a collection of tools from annotated [`tool`] functions.
 ///
 /// This macro takes a comma-separated list of function names that have been
-/// annotated with `#[tool]` and creates a `rsai::ToolSet` containing all of them.
+/// annotated with `#[tool]` and creates a `rsai::text::ToolSet` containing all of them.
 /// It provides a convenient way to group related tools for AI agents.
 ///
 /// # Syntax
@@ -292,12 +292,12 @@ pub fn tool(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// # Generated Code
 ///
 /// The macro generates code that:
-/// 1. Creates a new `rsai::ToolRegistry`
+/// 1. Creates a new `rsai::text::ToolRegistry`
 /// 2. Registers each tool function
-/// 3. Builds the final `rsai::ToolSet`
+/// 3. Builds the final `rsai::text::ToolSet`
 ///
 /// ```rust,no_run
-/// use rsai::ToolRegistry;
+/// use rsai::text::ToolRegistry;
 /// use std::sync::Arc;
 ///
 /// {

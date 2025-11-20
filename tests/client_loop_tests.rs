@@ -1,7 +1,8 @@
 use std::time::Duration;
 
-use rsai::{
-    ChatRole, ConversationMessage, LlmError, LlmProvider, Message, OpenAiClient, StructuredRequest,
+use rsai::OpenAiClient;
+use rsai::text::{
+    ChatRole, ConversationMessage, LlmError, LlmProvider, Message, StructuredRequest,
     ToolCallingConfig, ToolChoice, ToolConfig, ToolSet, completion_schema, tool, toolset,
 };
 use serde_json::{Value, json};
