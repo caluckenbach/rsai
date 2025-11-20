@@ -22,6 +22,7 @@ pub struct Request {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tool_calls: Option<u32>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub store: Option<bool>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,6 +46,7 @@ pub struct Request {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
 
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub truncation: Option<bool>,
 
     /// Used to boost cache hit rates by better bucketing similar requests
@@ -178,6 +180,7 @@ struct FunctionTool {
     strict: bool,
     #[serde(rename = "type")]
     r#type: FunctionType,
+    #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
 }
 
