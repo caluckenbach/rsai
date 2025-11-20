@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "rsai"
-version = "0.1.0-pre"
+version = "0.1.0"
 authors = ["Constantin Luckenbach <cluckenbach@protonmail.com>"]
 edition = "2024"
 description = "Predictable development for unpredictable Gen-AI models. Let the compiler handle the chaos."
