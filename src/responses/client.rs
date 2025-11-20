@@ -882,12 +882,12 @@ mod tests {
     where
         T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
     {
-        let client = create_client(&server).await;
+        let client = create_client(server).await;
 
         Mock::given(method("POST"))
             .and(path("/responses"))
             .respond_with(ResponseTemplate::new(200).set_body_json(response_body))
-            .mount(&server)
+            .mount(server)
             .await;
 
         let request = StructuredRequest {
@@ -1107,7 +1107,8 @@ mod schema_tests {
 
     #[test]
     fn test_schema_non_object_root_errors() {
-        let err = create_format_from_value(json!(true)).expect_err("non-object schema should error");
+        let err =
+            create_format_from_value(json!(true)).expect_err("non-object schema should error");
         matches_provider_error(err, "root is not an object");
     }
 
