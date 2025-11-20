@@ -47,7 +47,7 @@ pub use core::{ApiKey, GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
 pub use responses::HttpClientConfig;
 
 // Response types
-pub use core::{LanguageModelUsage, ResponseMetadata, StructuredResponse};
+pub use core::{LanguageModelUsage, ResponseMetadata, StructuredRequest, StructuredResponse};
 
 // Async helpers
 pub use core::BoxFuture;
