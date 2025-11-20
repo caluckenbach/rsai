@@ -23,6 +23,7 @@ use crate::{
 };
 use schemars::schema_for;
 use serde::Deserialize;
+use tracing::{self, debug, warn};
 
 #[derive(Debug, Clone)]
 pub struct HttpClientConfig {
@@ -98,6 +99,15 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Make an API request to the responses endpoint
+    #[tracing::instrument(
+        name = "http_request",
+        skip(self, request),
+        fields(
+            base_url = %self.config.base_url(),
+            endpoint = %self.config.endpoint()
+        ),
+        err
+    )]
     pub async fn make_api_request(&self, request: Request) -> Result<Response, LlmError> {
         let config = self.config.http_config();
 
@@ -119,6 +129,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
             match req_builder.send().await {
                 Err(e) => {
+                    warn!(attempt, error = %e, "HTTP request failed, retrying");
                     last_error = Some(LlmError::Network {
                         message: format!(
                             "Request failed (attempt {}/{}",
@@ -133,11 +144,14 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
                     // Success
                     if status.is_success() {
+                        debug!(status = %status, "HTTP request successful");
                         return res.json().await.map_err(|e| LlmError::Parse {
                             message: "Failed to parse API response".to_string(),
                             source: Box::new(e),
                         });
                     }
+
+                    warn!(attempt, status = %status, "API returned error status");
 
                     let is_retryable = status == reqwest::StatusCode::TOO_MANY_REQUESTS
                         || status.is_server_error();
@@ -175,8 +189,6 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
                 // Cap delay
                 let delay = std::time::Duration::from_millis(delay_ms).min(config.max_retry_delay);
-
-                // TODO: Add tracing warning if request failed.
 
                 tokio::time::sleep(delay).await;
             }
@@ -219,6 +231,16 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Internal implementation of the tool calling loop without timeout wrapper
+    #[tracing::instrument(
+        name = "tool_calling_loop",
+        level="debug",
+        skip(self, request, tool_registry, guard),
+        fields(
+            model = %request.model,
+            max_iterations = %guard.max_iterations
+        ),
+        err
+    )]
     async fn handle_tool_calling_loop_internal<T>(
         &self,
         request: StructuredRequest,
@@ -239,14 +261,24 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
             // Check iteration limit before processing
             guard.increment_iteration()?;
 
+            let iteration_span =
+                tracing::debug_span!("tool_loop_iteration", iteration = guard.current_iteration());
+            let _enter = iteration_span.enter();
+
             let responses_request = self.build_request::<T>(&request, &responses_input)?;
             let api_response = self.make_api_request(responses_request).await?;
 
             let function_calls = self.extract_function_calls(&api_response);
 
             if function_calls.is_empty() {
+                tracing::debug!("No more tool calls, returning final response");
                 return create_core_structured_response(api_response, self.config.provider());
             }
+
+            tracing::info!(
+                count = function_calls.len(),
+                "Model requested tool execution"
+            );
 
             self.process_function_calls(
                 &function_calls,

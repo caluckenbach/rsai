@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {
@@ -183,7 +184,7 @@ impl ToolRegistry {
         let overwritten_tool = w_tools.insert(schema.name, tool);
 
         if overwritten_tool.is_some() {
-            // TODO: Log warning
+            warn!(schema_name, "Tool was overwritten")
         }
 
         Ok(())
@@ -200,7 +201,18 @@ impl ToolRegistry {
         Ok(schema)
     }
 
+    #[tracing::instrument(
+        name = "execute_tool",
+        skip(self, tool_call),
+        fields(
+            tool_name = %tool_call.name,
+            call_id = %tool_call.call_id
+        ),
+        err
+    )]
     pub async fn execute(&self, tool_call: &ToolCall) -> Result<serde_json::Value, LlmError> {
+        tracing::trace!(arguments = ?tool_call.arguments, "Executing tool with arguments");
+
         let tool = {
             let r_tools = self
                 .tools
@@ -211,11 +223,17 @@ impl ToolRegistry {
             r_tools.get(&tool_call.name).cloned()
         };
 
-        if let Some(tool) = tool {
+        let result = if let Some(tool) = tool {
             tool.execute(tool_call.arguments.clone()).await
         } else {
             Err(LlmError::ToolNotFound(tool_call.name.clone()))
+        };
+
+        if result.is_ok() {
+            tracing::debug!("Tool execution completed successfully");
         }
+
+        result
     }
 }
 

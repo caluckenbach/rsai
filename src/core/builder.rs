@@ -2,6 +2,8 @@ use std::{env, marker::PhantomData};
 
 use serde::de::Deserialize;
 
+use tracing::{debug, instrument};
+
 use crate::{
     provider::{Provider, openai, openrouter},
     responses::HttpClientConfig,
@@ -232,10 +234,21 @@ impl<State: private::Completable> LlmBuilder<State> {
     /// # Ok(())
     /// # }
     /// ```
+    #[instrument(
+        name = "generate_structured",
+        skip(self),
+        fields(
+            model = ?self.fields.model,
+            provider = ?self.fields.provider,
+            max_tokens = ?self.fields.max_tokens,
+        ),
+        err
+    )]
     pub async fn complete<T>(self) -> Result<StructuredResponse<T>, LlmError>
     where
         T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
     {
+        debug!("Starting structured generation request");
         let (messages, provider, model) = self.fields.validate()?;
         let model_string = model.to_string();
         let messages = messages.to_vec();
