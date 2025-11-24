@@ -1,19 +1,25 @@
 use async_trait::async_trait;
 
+use crate::{
+    Provider,
+    responses::{request::Format, response::Response},
+};
+
 use super::{
     error::LlmError,
-    types::{BoxFuture, StructuredRequest, StructuredResponse, Tool, ToolRegistry},
+    types::{BoxFuture, StructuredRequest, Tool, ToolRegistry},
 };
 
 #[async_trait]
 pub trait LlmProvider {
-    async fn generate_structured<T>(
+    async fn generate_completion<T>(
         &self,
         request: StructuredRequest,
+        format: Format,
         tool_registry: Option<&ToolRegistry>,
-    ) -> Result<StructuredResponse<T>, LlmError>
+    ) -> Result<T::Output, LlmError>
     where
-        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema;
+        T: CompletionTarget + Send;
 }
 
 pub trait ToolFunction: Send + Sync {
@@ -22,4 +28,16 @@ pub trait ToolFunction: Send + Sync {
         &'a self,
         params: serde_json::Value,
     ) -> BoxFuture<'a, Result<serde_json::Value, LlmError>>;
+}
+
+pub trait CompletionTarget: Sized + Send {
+    type Output;
+
+    fn format() -> Result<Format, LlmError>;
+
+    fn parse_response(res: Response, provider: Provider) -> Result<Self::Output, LlmError>;
+
+    fn supports_tools() -> bool {
+        true
+    }
 }

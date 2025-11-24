@@ -1,5 +1,8 @@
-use crate::core::{LlmError, traits::ToolFunction};
+use crate::core::{LlmError, traits::CompletionTarget, traits::ToolFunction};
 use crate::provider::Provider;
+use crate::responses::{self, request::Format, response::Response};
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
@@ -93,6 +96,13 @@ pub struct GenerationConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructuredResponse<T> {
     pub content: T,
+    pub usage: LanguageModelUsage,
+    pub metadata: ResponseMetadata,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextResponse {
+    pub text: String,
     pub usage: LanguageModelUsage,
     pub metadata: ResponseMetadata,
 }
@@ -252,6 +262,37 @@ pub struct ToolSet {
 impl ToolSet {
     pub fn tools(&self) -> Result<Vec<Tool>, LlmError> {
         self.registry.get_schemas()
+    }
+}
+
+impl<T> CompletionTarget for T
+where
+    T: DeserializeOwned + JsonSchema + Send,
+{
+    type Output = StructuredResponse<T>;
+
+    fn format() -> Result<Format, LlmError> {
+        responses::create_format_for_type::<T>()
+    }
+
+    fn parse_response(res: Response, provider: Provider) -> Result<Self::Output, LlmError> {
+        responses::create_core_structured_response(res, provider)
+    }
+}
+
+impl CompletionTarget for TextResponse {
+    type Output = TextResponse;
+
+    fn format() -> Result<Format, LlmError> {
+        Ok(responses::create_text_format())
+    }
+
+    fn parse_response(res: Response, provider: Provider) -> Result<Self::Output, LlmError> {
+        responses::create_core_text_response(res, provider)
+    }
+
+    fn supports_tools() -> bool {
+        false
     }
 }
 
