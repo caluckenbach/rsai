@@ -61,5 +61,9 @@ name = "structured-generation"
 path = "examples/structured_generation.rs"
 
 [[example]]
+name = "text-generation"
+path = "examples/text_generation.rs"
+
+[[example]]
 name = "tracing"
 path = "examples/tracing.rs"
