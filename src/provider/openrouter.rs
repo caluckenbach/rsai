@@ -224,7 +224,7 @@ impl LlmProvider for OpenRouterClient {
                 .await;
         }
 
-        // Otherwise, make a single request expecting structured content
+        // Otherwise, make a single request expecting the configured completion output
         let messages_clone = request.messages.clone();
         let responses_request = self.responses_client.build_request_with_format(
             &request,

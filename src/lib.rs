@@ -10,7 +10,7 @@
 //! ## Quick Start
 //!
 //! ```rust,no_run
-//! use rsai::{llm, Message, ChatRole, ApiKey, Provider, completion_schema};
+//! use rsai::{llm, Message, ChatRole, ApiKey, Provider, TextResponse, completion_schema};
 //!
 //! #[completion_schema]
 //! struct Analysis {
@@ -29,6 +29,24 @@
 //!     }])
 //!     .complete::<Analysis>()
 //!     .await?;
+//!
+//! let reply = llm::with(Provider::OpenAI)
+//!     .api_key(ApiKey::Default)?
+//!     .model("gpt-4o-mini")
+//!     .messages(vec![
+//!         Message {
+//!             role: ChatRole::System,
+//!             content: "You are friendly and concise.".to_string(),
+//!         },
+//!         Message {
+//!             role: ChatRole::User,
+//!             content: "Share a fun fact about Rust.".to_string(),
+//!         },
+//!     ])
+//!     .complete::<TextResponse>()
+//!     .await?;
+//!
+//! println!("{}", reply.text);
 //! Ok(())
 //! }
 //! ```
