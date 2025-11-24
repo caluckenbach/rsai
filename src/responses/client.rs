@@ -10,13 +10,15 @@
 use std::time::Duration;
 
 use crate::{
-    Provider,
+    CompletionTarget, Provider,
     core::{
         ChatRole, ConversationMessage, LanguageModelUsage, LlmError, ResponseMetadata,
-        StructuredRequest, StructuredResponse, Tool, ToolCall, ToolCallingGuard, ToolRegistry,
+        StructuredRequest, StructuredResponse, TextResponse, Tool, ToolCall, ToolCallingGuard,
+        ToolRegistry,
     },
     responses::{
         Format, FormatType, FunctionToolCall, FunctionToolCallOutput, JsonSchema, JsonSchemaType,
+        TextType,
         request::{InputItem, InputMessage, InputMessageRole, Request},
         response::{MessageContent, OutputContent, Response},
     },
@@ -210,16 +212,17 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         request: StructuredRequest,
         tool_registry: &ToolRegistry,
         guard: &mut ToolCallingGuard,
-    ) -> Result<StructuredResponse<T>, LlmError>
+        format: Format,
+    ) -> Result<T::Output, LlmError>
     where
-        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+        T: CompletionTarget,
     {
         let timeout_duration = guard.timeout;
 
         // Use tokio::time::timeout to add timeout protection
         match tokio::time::timeout(
             timeout_duration,
-            self.handle_tool_calling_loop_internal(request, tool_registry, guard),
+            self.handle_tool_calling_loop_internal::<T>(request, tool_registry, guard, format),
         )
         .await
         {
@@ -246,9 +249,10 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         request: StructuredRequest,
         tool_registry: &ToolRegistry,
         guard: &mut ToolCallingGuard,
-    ) -> Result<StructuredResponse<T>, LlmError>
+        format: Format,
+    ) -> Result<T::Output, LlmError>
     where
-        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+        T: CompletionTarget,
     {
         let mut responses_input = convert_messages_to_responses_format(request.messages.clone())?;
         let is_parallel = request
@@ -265,14 +269,15 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
                 tracing::debug_span!("tool_loop_iteration", iteration = guard.current_iteration());
             let _enter = iteration_span.enter();
 
-            let responses_request = self.build_request::<T>(&request, &responses_input)?;
+            let responses_request =
+                self.build_request_with_format(&request, &responses_input, format.clone())?;
             let api_response = self.make_api_request(responses_request).await?;
 
             let function_calls = self.extract_function_calls(&api_response);
 
             if function_calls.is_empty() {
                 tracing::debug!("No more tool calls, returning final response");
-                return create_core_structured_response(api_response, self.config.provider());
+                return T::parse_response(api_response, self.config.provider());
             }
 
             tracing::info!(
@@ -291,15 +296,13 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Build a responses API request from core request and input
-    pub fn build_request<T>(
+    pub fn build_request_with_format(
         &self,
         request: &StructuredRequest,
         responses_input: &[InputItem],
-    ) -> Result<Request, LlmError>
-    where
-        T: schemars::JsonSchema,
-    {
-        build_request_payload::<T>(request, responses_input)
+        format: Format,
+    ) -> Result<Request, LlmError> {
+        build_request_payload_with_format(request, responses_input, format)
     }
 
     /// Extract function calls from API response
@@ -421,17 +424,16 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 }
 
-pub(crate) fn build_request_payload<T>(
+// This is a separate method to `build_request_with_format` for testing.
+pub(crate) fn build_request_payload_with_format(
     request: &StructuredRequest,
     responses_input: &[InputItem],
-) -> Result<Request, LlmError>
-where
-    T: schemars::JsonSchema,
-{
+    format: Format,
+) -> Result<Request, LlmError> {
     let mut req = Request {
         model: request.model.clone(),
         input: responses_input.to_vec(),
-        text: create_format_for_type::<T>()?,
+        text: format,
         // Default fields
         parallel_tool_calls: None,
         temperature: None,
@@ -603,6 +605,14 @@ pub(crate) fn create_format_from_value(
     })
 }
 
+pub(crate) fn create_text_format() -> Format {
+    Format {
+        format: FormatType::Text {
+            r#type: TextType::Text,
+        },
+    }
+}
+
 /// Convert API response to core structured response with specified provider
 pub(crate) fn create_core_structured_response<T>(
     res: Response,
@@ -661,6 +671,55 @@ where
         }
         OutputContent::FunctionCall(_) => Err(LlmError::Provider {
             message: "Function call response received when expecting structured output".to_string(),
+            source: None,
+        }),
+    }
+}
+
+/// Convert API response to a plain text response
+pub(crate) fn create_core_text_response(
+    res: Response,
+    provider: crate::provider::Provider,
+) -> Result<TextResponse, LlmError> {
+    let output_content = res.output.first().ok_or_else(|| LlmError::Provider {
+        message: "No output in response".to_string(),
+        source: None,
+    })?;
+
+    match output_content {
+        OutputContent::OutputMessage(message) => {
+            let content = message.content.first().ok_or_else(|| LlmError::Provider {
+                message: "No content in message".to_string(),
+                source: None,
+            })?;
+
+            let text = match content {
+                MessageContent::OutputText(output) => output.text.clone(),
+                MessageContent::Refusal(refusal) => {
+                    return Err(LlmError::Api {
+                        message: format!("Model refused: {}", refusal.refusal),
+                        status_code: None,
+                        source: None,
+                    });
+                }
+            };
+
+            Ok(TextResponse {
+                text,
+                usage: LanguageModelUsage {
+                    prompt_tokens: res.usage.input_tokens,
+                    completion_tokens: res.usage.output_tokens,
+                    total_tokens: res.usage.total_tokens,
+                },
+                metadata: ResponseMetadata {
+                    provider,
+                    model: res.model,
+                    id: res.id,
+                },
+            })
+        }
+        OutputContent::FunctionCall(_) => Err(LlmError::Provider {
+            message: "Function call response received when expecting text output".to_string(),
             source: None,
         }),
     }
@@ -903,8 +962,10 @@ mod tests {
         let tool_registry = ToolRegistry::new();
         let mut guard = ToolCallingGuard::new();
 
+        let format = create_format_for_type::<T>()?;
+
         client
-            .handle_tool_calling_loop(request, &tool_registry, &mut guard)
+            .handle_tool_calling_loop::<T>(request, &tool_registry, &mut guard, format)
             .await
     }
 
@@ -1176,8 +1237,9 @@ mod schema_tests {
         let request = sample_request(Some(tool_config), Some(generation_config));
         let responses_input =
             convert_messages_to_responses_format(request.messages.clone()).expect("inputs");
+        let format = create_format_for_type::<StandardObject>().expect("schema");
         let api_request =
-            build_request_payload::<StandardObject>(&request, &responses_input).expect("request");
+            build_request_payload_with_format(&request, &responses_input, format).expect("request");
 
         assert_eq!(api_request.model, "gpt-4o-mini");
         assert_eq!(api_request.parallel_tool_calls, Some(false));
@@ -1215,8 +1277,9 @@ mod schema_tests {
         let responses_input =
             convert_messages_to_responses_format(request.messages.clone()).expect("inputs");
 
+        let format = create_format_for_type::<StandardObject>().expect("schema");
         let api_request =
-            build_request_payload::<StandardObject>(&request, &responses_input).expect("request");
+            build_request_payload_with_format(&request, &responses_input, format).expect("request");
 
         assert!(api_request.parallel_tool_calls.is_none());
         assert!(api_request.tools.is_none());

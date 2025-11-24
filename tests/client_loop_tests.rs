@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use rsai::{
-    ChatRole, ConversationMessage, LlmError, LlmProvider, Message, OpenAiClient, StructuredRequest,
-    ToolCallingConfig, ToolChoice, ToolConfig, ToolSet, completion_schema, tool, toolset,
+    ChatRole, CompletionTarget, ConversationMessage, LlmError, LlmProvider, Message, OpenAiClient,
+    StructuredRequest, ToolCallingConfig, ToolChoice, ToolConfig, ToolSet, completion_schema, tool,
+    toolset,
 };
 use serde_json::{Value, json};
 use wiremock::{
@@ -85,7 +86,11 @@ async fn sequential_tool_call_flow_appends_history() {
 
     let client = client_for(&server, None);
     let response = client
-        .generate_structured::<SumResponse>(request, Some(&toolset.registry))
+        .generate_completion::<SumResponse>(
+            request,
+            <SumResponse as CompletionTarget>::format().expect("format"),
+            Some(&toolset.registry),
+        )
         .await
         .expect("structured response");
     assert_eq!(response.content.sum, 3);
@@ -136,7 +141,11 @@ async fn parallel_tool_calls_submit_all_results_together() {
 
     let client = client_for(&server, None);
     let response = client
-        .generate_structured::<SumResponse>(request, Some(&toolset.registry))
+        .generate_completion::<SumResponse>(
+            request,
+            <SumResponse as CompletionTarget>::format().expect("format"),
+            Some(&toolset.registry),
+        )
         .await
         .expect("structured response");
     assert_eq!(response.content.sum, 15);
@@ -198,7 +207,11 @@ async fn guard_stops_iteration_after_max_limit() {
     let guard_config = ToolCallingConfig::new(1, timeout);
     let client = client_for(&server, Some(guard_config));
     let err = client
-        .generate_structured::<SumResponse>(request, Some(&toolset.registry))
+        .generate_completion::<SumResponse>(
+            request,
+            <SumResponse as CompletionTarget>::format().expect("format"),
+            Some(&toolset.registry),
+        )
         .await
         .expect_err("iteration guard should trip");
 
@@ -231,7 +244,11 @@ async fn tool_call_timeout_triggers_error() {
     let guard_config = ToolCallingConfig::new(3, Duration::from_millis(50));
     let client = client_for(&server, Some(guard_config.clone()));
     let err = client
-        .generate_structured::<SumResponse>(request, Some(&toolset.registry))
+        .generate_completion::<SumResponse>(
+            request,
+            <SumResponse as CompletionTarget>::format().expect("format"),
+            Some(&toolset.registry),
+        )
         .await
         .expect_err("timeout should trigger");
 
