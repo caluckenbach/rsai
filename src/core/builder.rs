@@ -1,7 +1,5 @@
 use std::{env, marker::PhantomData};
 
-use serde::de::Deserialize;
-
 use tracing::{debug, instrument};
 
 use crate::{
@@ -13,8 +11,8 @@ use super::{
     error::LlmError,
     traits::LlmProvider,
     types::{
-        ConversationMessage, GenerationConfig, Message, StructuredRequest, StructuredResponse,
-        ToolChoice, ToolConfig, ToolRegistry,
+        ConversationMessage, GenerationConfig, Message, StructuredRequest, ToolChoice, ToolConfig,
+        ToolRegistry,
     },
 };
 
@@ -206,14 +204,14 @@ impl<State: private::Completable> LlmBuilder<State> {
         self
     }
 
-    /// Execute the LLM request and return structured output of type T.
-    /// The type T must implement Deserialize and JsonSchema for structured output generation as well as
-    /// be annotated with `#[schemars(deny_unknown_fields)]`.
-    /// Use the `completion_schema` attribute macro to easily define structured output types.
+    /// Execute the LLM request and return an output defined by `T`.
+    ///
+    /// The target type `T` must implement [`CompletionTarget`]. Structured schemas can be created
+    /// with the `#[completion_schema]` macro, while plain text responses can use [`TextResponse`].
     ///
     /// # Example
     /// ```no_run
-    /// # use rsai::{completion_schema, llm, Message, ChatRole, ApiKey, Provider};
+    /// # use rsai::{completion_schema, llm, Message, ChatRole, ApiKey, Provider, TextResponse};
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// #[completion_schema]
@@ -231,11 +229,21 @@ impl<State: private::Completable> LlmBuilder<State> {
     ///     }])
     ///     .complete::<Analysis>()
     ///     .await?;
+    ///
+    /// let text = llm::with(Provider::OpenAI)
+    ///     .api_key(ApiKey::Default)?
+    ///     .model("gpt-4o-mini")
+    ///     .messages(vec![Message {
+    ///         role: ChatRole::User,
+    ///         content: "Say hello".to_string(),
+    ///     }])
+    ///     .complete::<TextResponse>()
+    ///     .await?;
     /// # Ok(())
     /// # }
     /// ```
     #[instrument(
-        name = "generate_structured",
+        name = "generate_completion",
         skip(self),
         fields(
             model = ?self.fields.model,
@@ -244,23 +252,33 @@ impl<State: private::Completable> LlmBuilder<State> {
         ),
         err
     )]
-    pub async fn complete<T>(self) -> Result<StructuredResponse<T>, LlmError>
+    pub async fn complete<T>(self) -> Result<T::Output, LlmError>
     where
-        T: for<'a> Deserialize<'a> + Send + schemars::JsonSchema,
+        T: super::traits::CompletionTarget + Send,
     {
-        debug!("Starting structured generation request");
+        debug!("Starting generation request");
         let (messages, provider, model) = self.fields.validate()?;
         let model_string = model.to_string();
         let messages = messages.to_vec();
+        let format = T::format()?;
+
+        if !T::supports_tools() && self.fields.tool_registry.is_some() {
+            return Err(LlmError::Builder(
+                "Tools are only supported with structured completion targets".to_string(),
+            ));
+        }
 
         // Deferred error handling for tool registry errors in case of a poisoned lock.
-        let tool_schemas = self
-            .fields
-            .tool_registry
-            .as_ref()
-            .map(|registry| registry.get_schemas())
-            .transpose()?
-            .map(|tools| tools.into_boxed_slice());
+        let tool_schemas = if T::supports_tools() {
+            self.fields
+                .tool_registry
+                .as_ref()
+                .map(|registry| registry.get_schemas())
+                .transpose()?
+                .map(|tools| tools.into_boxed_slice())
+        } else {
+            None
+        };
 
         match provider {
             Provider::OpenAI => {
@@ -272,8 +290,8 @@ impl<State: private::Completable> LlmBuilder<State> {
                 let req = StructuredRequest {
                     model: model_string,
                     messages: conversation_messages,
-                    tool_config: Some(ToolConfig {
-                        tools: tool_schemas.clone(),
+                    tool_config: tool_schemas.map(|tools| ToolConfig {
+                        tools: Some(tools),
                         tool_choice: self.fields.tool_choice.clone(),
                         parallel_tool_calls: self.fields.parallel_tool_calls,
                     }),
@@ -285,7 +303,11 @@ impl<State: private::Completable> LlmBuilder<State> {
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
                 client
-                    .generate_structured(req, self.fields.tool_registry.as_ref())
+                    .generate_completion::<T>(
+                        req,
+                        format.clone(),
+                        self.fields.tool_registry.as_ref(),
+                    )
                     .await
             }
             Provider::OpenRouter => {
@@ -297,8 +319,8 @@ impl<State: private::Completable> LlmBuilder<State> {
                 let req = StructuredRequest {
                     model: model_string,
                     messages: conversation_messages,
-                    tool_config: Some(ToolConfig {
-                        tools: tool_schemas.clone(),
+                    tool_config: tool_schemas.map(|tools| ToolConfig {
+                        tools: Some(tools),
                         tool_choice: self.fields.tool_choice.clone(),
                         parallel_tool_calls: self.fields.parallel_tool_calls,
                     }),
@@ -310,7 +332,7 @@ impl<State: private::Completable> LlmBuilder<State> {
                 };
                 let client = openrouter::create_openrouter_client_from_builder(&self)?;
                 client
-                    .generate_structured(req, self.fields.tool_registry.as_ref())
+                    .generate_completion::<T>(req, format, self.fields.tool_registry.as_ref())
                     .await
             }
         }
