@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```rust
-use rsai::{llm, Message, ChatRole, ApiKey, Provider, completion_schema};
+use rsai::{llm, Message, ChatRole, ApiKey, Provider, TextResponse, completion_schema};
 
 #[completion_schema]
 struct Analysis {
@@ -20,6 +20,24 @@ let analysis = llm::with(Provider::OpenAI)
     }])
     .complete::<Analysis>()
     .await?;
+
+let reply = llm::with(Provider::OpenAI)
+    .api_key(ApiKey::Default)?
+    .model("gpt-4o-mini")
+    .messages(vec![
+        Message {
+            role: ChatRole::System,
+            content: "You are friendly and concise.".to_string(),
+        },
+        Message {
+            role: ChatRole::User,
+            content: "Share a fun fact about Rust.".to_string(),
+        },
+    ])
+    .complete::<TextResponse>()
+    .await?;
+
+println!("{}", reply.text);
 ```
 
 ## Structured Generation
@@ -112,6 +130,34 @@ struct CustomType {
 ```
 
 > **Note**: The library automatically handles provider-specific requirements. For example, OpenAI requires root schemas to be objects, so non-object types like enums are transparently wrapped and unwrapped.
+
+## Text Generation
+
+To obtain plain-text output without defining a schema, target `TextResponse`:
+
+```rust
+use rsai::{llm, ApiKey, Provider, Message, ChatRole, TextResponse};
+
+let fact = llm::with(Provider::OpenAI)
+    .api_key(ApiKey::Default)?
+    .model("gpt-4o-mini")
+    .messages(vec![
+        Message {
+            role: ChatRole::System,
+            content: "You explain things clearly but briefly.".to_string(),
+        },
+        Message {
+            role: ChatRole::User,
+            content: "What makes Rust's borrow checker special?".to_string(),
+        },
+    ])
+    .complete::<TextResponse>()
+    .await?;
+
+println!("{}", fact.text);
+```
+
+See `examples/text_generation.rs` for a runnable version.
 
 ## Known Issues
 
