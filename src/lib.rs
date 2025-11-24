@@ -44,10 +44,12 @@ pub use core::{ToolCallingConfig, ToolCallingGuard};
 
 // Configuration types
 pub use core::{ApiKey, GenerationConfig, LlmBuilder, ToolChoice, ToolConfig};
-pub use responses::HttpClientConfig;
+pub use responses::{Format, HttpClientConfig};
 
 // Response types
-pub use core::{LanguageModelUsage, ResponseMetadata, StructuredRequest, StructuredResponse};
+pub use core::{
+    LanguageModelUsage, ResponseMetadata, StructuredRequest, StructuredResponse, TextResponse,
+};
 
 // Async helpers
 pub use core::BoxFuture;
@@ -63,7 +65,7 @@ pub use core::llm;
 pub use provider::{OpenAiClient, OpenAiConfig, OpenRouterClient, OpenRouterConfig, Provider};
 
 // Traits
-pub use core::{LlmProvider, ToolFunction};
+pub use core::{CompletionTarget, LlmProvider, ToolFunction};
 
 // Macros from `rsai-macros`
 pub use rsai_macros::{completion_schema, tool, toolset};
