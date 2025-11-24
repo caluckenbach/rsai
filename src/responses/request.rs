@@ -218,8 +218,6 @@ pub struct FunctionToolCallOutput {
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged, rename_all = "snake_case")]
 pub enum FormatType {
-    // TODO: remove this, once text input is supported
-    #[allow(dead_code)]
     Text {
         #[serde(rename = "type")]
         r#type: TextType,
@@ -238,8 +236,6 @@ pub enum InputMessageRole {
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum TextType {
-    // TODO: Remove this, once text input is supported
-    #[allow(dead_code)]
     Text,
 }
 

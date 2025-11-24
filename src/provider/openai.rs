@@ -14,8 +14,8 @@
 use crate::provider::constants::openai;
 
 use crate::core::{
-    LlmBuilder, LlmError, LlmProvider, StructuredRequest, StructuredResponse, ToolCallingConfig,
-    ToolCallingGuard, ToolRegistry,
+    LlmBuilder, LlmError, LlmProvider, StructuredRequest, ToolCallingConfig, ToolCallingGuard,
+    ToolRegistry,
 };
 use crate::responses::{HttpClientConfig, ResponsesClient, ResponsesProviderConfig};
 use async_trait::async_trait;
@@ -151,13 +151,14 @@ impl OpenAiClient {
 
 #[async_trait]
 impl LlmProvider for OpenAiClient {
-    async fn generate_structured<T>(
+    async fn generate_completion<T>(
         &self,
         request: StructuredRequest,
+        format: crate::responses::Format,
         tool_registry: Option<&ToolRegistry>,
-    ) -> Result<StructuredResponse<T>, LlmError>
+    ) -> Result<T::Output, LlmError>
     where
-        T: serde::de::DeserializeOwned + Send + schemars::JsonSchema,
+        T: crate::CompletionTarget + Send,
     {
         // If tools are present and we have a registry, handle automatic tool calling
         let has_tools = request
@@ -170,21 +171,22 @@ impl LlmProvider for OpenAiClient {
             let mut guard = self.responses_client.config.get_tool_calling_guard();
             return self
                 .responses_client
-                .handle_tool_calling_loop(request, tool_registry, &mut guard)
+                .handle_tool_calling_loop::<T>(request, tool_registry, &mut guard, format)
                 .await;
         }
 
         // Otherwise, make a single request expecting structured content
         let messages_clone = request.messages.clone();
-        let responses_request = self.responses_client.build_request::<T>(
+        let responses_request = self.responses_client.build_request_with_format(
             &request,
             &crate::responses::convert_messages_to_responses_format(messages_clone)?,
+            format,
         )?;
         let api_response = self
             .responses_client
             .make_api_request(responses_request)
             .await?;
-        crate::responses::create_core_structured_response(api_response, super::Provider::OpenAI)
+        T::parse_response(api_response, super::Provider::OpenAI)
     }
 }
 
