@@ -51,6 +51,7 @@
 //! }
 //! ```
 //!
+mod completions;
 mod core;
 mod provider;
 mod responses;
@@ -80,7 +81,10 @@ pub type Result<T> = std::result::Result<T, LlmError>;
 pub use core::llm;
 
 // Gen AI providers
-pub use provider::{OpenAiClient, OpenAiConfig, OpenRouterClient, OpenRouterConfig, Provider};
+pub use provider::{
+    GeminiClient, GeminiConfig, OpenAiClient, OpenAiConfig, OpenRouterClient, OpenRouterConfig,
+    Provider,
+};
 
 // Traits
 pub use core::{CompletionTarget, LlmProvider, ToolFunction};
