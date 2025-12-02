@@ -45,6 +45,10 @@ name = "function-calling"
 path = "examples/function_calling.rs"
 
 [[example]]
+name = "gemini"
+path = "examples/gemini.rs"
+
+[[example]]
 name = "generation-config"
 path = "examples/generation_config.rs"
 
