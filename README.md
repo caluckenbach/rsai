@@ -1,9 +1,23 @@
 > **⚠️ WARNING**: This is a pre-release version with an unstable API. Breaking changes may occur between versions. Use with caution and pin to specific versions in production applications.
 
+## Design Philosophy
+
+This library offers an **opinionated feature set**, rather than trying to be a general-purpose LLM client.
+
+- **Type Safety vs. TTFT**: Streaming is not supported. We explicitly prioritize type safety and validation completeness over Time To First Token (TTFT). You get a valid struct or an error, never a partial state.
+- **Alternatives**: For a more general-purpose library that supports streaming, disparate providers, and conversational features, consider [Rig](https://github.com/0xPlaygrounds/rig).
+
+## Available Providers
+
+| Provider | API Type | Notes |
+|----------|----------|-------|
+| **OpenAI** | Responses API | Uses the `/responses` endpoint for structured interactions. |
+| **OpenRouter** | Responses API | Uses the `/responses` endpoint, supporting a wide range of models. |
+
 ## Quick Start
 
 ```rust
-use rsai::{llm, Message, ChatRole, ApiKey, Provider, TextResponse, completion_schema};
+use rsai::{llm, Message, ChatRole, ApiKey, Provider, completion_schema};
 
 #[completion_schema]
 struct Analysis {
@@ -20,79 +34,14 @@ let analysis = llm::with(Provider::OpenAI)
     }])
     .complete::<Analysis>()
     .await?;
-
-let reply = llm::with(Provider::OpenAI)
-    .api_key(ApiKey::Default)?
-    .model("gpt-4o-mini")
-    .messages(vec![
-        Message {
-            role: ChatRole::System,
-            content: "You are friendly and concise.".to_string(),
-        },
-        Message {
-            role: ChatRole::User,
-            content: "Share a fun fact about Rust.".to_string(),
-        },
-    ])
-    .complete::<TextResponse>()
-    .await?;
-
-println!("{}", reply.text);
 ```
 
 ## Structured Generation
 
-Get AI responses that conform to your exact Rust types - no JSON parsing required!
+The `#[completion_schema]` macro automatically adds the necessary derives (`Deserialize`, `JsonSchema`) and attributes for structured output. It supports:
 
-The `#[completion_schema]` macro automatically adds the necessary derives and attributes for structured output:
-
-- `#[derive(serde::Deserialize, schemars::JsonSchema)]`
-- `#[schemars(deny_unknown_fields)]`
-
-### Structs
-
-```rust
-#[completion_schema]
-struct MovieReview {
-    title: String,
-    rating: u8,
-    summary: String,
-}
-
-let review = llm::with(Provider::OpenAI)
-    .api_key(ApiKey::Default)?
-    .model("gpt-4o-mini")
-    .messages(vec![Message {
-        role: ChatRole::User,
-        content: "Review the movie 'Inception' in 50 words".to_string(),
-    }])
-    .complete::<MovieReview>()
-    .await?;
-```
-
-### Simple Enums
-
-```rust
-#[completion_schema]
-enum Priority {
-    Low,
-    Medium,
-    High,
-    Critical,
-}
-
-let priority = llm::with(Provider::OpenAI)
-    .api_key(ApiKey::Default)?
-    .model("gpt-4o-mini")
-    .messages(vec![Message {
-        role: ChatRole::User,
-        content: "What priority for a button color change request?".to_string(),
-    }])
-    .complete::<Priority>()
-    .await?;
-```
-
-### Enums with Data
+- **Structs**
+- **Enums** (Unit, Tuple, and Struct variants)
 
 ```rust
 #[completion_schema]
@@ -106,58 +55,29 @@ enum TaskStatus {
 let status = llm::with(Provider::OpenAI)
     .api_key(ApiKey::Default)?
     .model("gpt-4o-mini")
-    .messages(vec![Message {
-        role: ChatRole::User,
-        content: "Status of a task that's 75% complete?".to_string(),
-    }])
+    .messages(vec![/* ... */])
     .complete::<TaskStatus>()
     .await?;
 ```
 
-### Manual Schema Definition (Alternative)
-
-If you prefer manual control, you can still use the traditional approach:
-
-```rust
-use serde::Deserialize;
-use schemars::JsonSchema;
-
-#[derive(Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields)]
-struct CustomType {
-    field: String,
-}
-```
-
-> **Note**: The library automatically handles provider-specific requirements. For example, OpenAI requires root schemas to be objects, so non-object types like enums are transparently wrapped and unwrapped.
+> **Note**: The library automatically handles provider-specific requirements (e.g., wrapping non-object types for OpenAI).
 
 ## Text Generation
 
-To obtain plain-text output without defining a schema, target `TextResponse`:
+For plain text, use `TextResponse`.
 
 ```rust
-use rsai::{llm, ApiKey, Provider, Message, ChatRole, TextResponse};
+use rsai::{llm, TextResponse, /* ... */};
 
-let fact = llm::with(Provider::OpenAI)
-    .api_key(ApiKey::Default)?
-    .model("gpt-4o-mini")
-    .messages(vec![
-        Message {
-            role: ChatRole::System,
-            content: "You explain things clearly but briefly.".to_string(),
-        },
-        Message {
-            role: ChatRole::User,
-            content: "What makes Rust's borrow checker special?".to_string(),
-        },
-    ])
+let response = llm::with(Provider::OpenAI)
+    // ... configuration ...
     .complete::<TextResponse>()
     .await?;
 
-println!("{}", fact.text);
+println!("{}", response.text);
 ```
 
-See `examples/text_generation.rs` for a runnable version.
+See `examples/` for more runnable examples.
 
 ## Known Issues
 
