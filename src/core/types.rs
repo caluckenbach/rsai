@@ -385,7 +385,11 @@ impl CompletionTarget for TextResponse {
     }
 
     fn supports_tools() -> bool {
-        false
+        // TextResponse supports tools - the tool calling loop processes function calls
+        // and the model eventually returns text after tools are executed.
+        // Provider-specific constraints (e.g., Gemini can't combine tools with structured
+        // JSON output) are validated at the provider level.
+        true
     }
 }
 
