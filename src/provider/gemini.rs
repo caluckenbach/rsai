@@ -266,7 +266,8 @@ impl CompletionRequestBuilder for GeminiRequestBuilder {
         if tools.is_some() && matches!(format.format, FormatType::JsonSchema(_)) {
             return Err(LlmError::ProviderConfiguration(
                 "Gemini does not support combining function calling with structured JSON output. \
-                 Use TextResponse with tools, or structured output without tools.".to_string()
+                 Use TextResponse with tools, or structured output without tools."
+                    .to_string(),
             ));
         }
 
@@ -436,10 +437,7 @@ fn convert_to_gemini_schema(schema: &Value) -> Value {
                     // Convert type to uppercase
                     "type" => {
                         if let Value::String(t) = value {
-                            result.insert(
-                                "type".to_string(),
-                                Value::String(t.to_uppercase()),
-                            );
+                            result.insert("type".to_string(), Value::String(t.to_uppercase()));
                         }
                     }
                     // Recurse into nested schemas
