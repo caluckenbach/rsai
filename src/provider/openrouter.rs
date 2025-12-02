@@ -235,7 +235,11 @@ impl LlmProvider for OpenRouterClient {
             .responses_client
             .make_api_request(responses_request)
             .await?;
-        T::parse_response(api_response, super::Provider::OpenRouter)
+        let provider_response = crate::responses::convert_to_provider_response(
+            api_response,
+            super::Provider::OpenRouter,
+        )?;
+        T::parse_response(provider_response)
     }
 }
 

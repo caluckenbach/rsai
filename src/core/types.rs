@@ -1,6 +1,6 @@
 use crate::core::{LlmError, traits::CompletionTarget, traits::ToolFunction};
 use crate::provider::Provider;
-use crate::responses::{self, request::Format, response::Response};
+use crate::responses::{self, request::Format};
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -119,6 +119,39 @@ pub struct ResponseMetadata {
     pub provider: Provider,
     pub model: String,
     pub id: String,
+}
+
+/// Provider-agnostic response type that all providers convert to.
+/// This is the unified response format used by `CompletionTarget::parse_response`.
+#[derive(Debug, Clone)]
+pub struct ProviderResponse {
+    pub id: String,
+    pub model: String,
+    pub provider: Provider,
+    pub content: ResponseContent,
+    pub usage: LanguageModelUsage,
+}
+
+/// The content of a provider response - either text, function calls, or a refusal.
+#[derive(Debug, Clone)]
+pub enum ResponseContent {
+    /// Plain text or structured JSON text response
+    Text(String),
+    /// One or more function calls requested by the model
+    FunctionCalls(Vec<FunctionCallData>),
+    /// Model refused to respond
+    Refusal(String),
+}
+
+/// Data for a function call requested by the model.
+#[derive(Debug, Clone)]
+pub struct FunctionCallData {
+    /// Unique identifier for this function call
+    pub id: String,
+    /// The name of the function to call
+    pub name: String,
+    /// The arguments to pass to the function (as JSON)
+    pub arguments: Value,
 }
 
 pub struct ToolRegistry {
@@ -265,6 +298,14 @@ impl ToolSet {
     }
 }
 
+/// Wrapper for non-object JSON Schema types (enums, strings, numbers, etc.)
+/// OpenAI's structured output API requires the root schema to be an object,
+/// so we wrap non-object types in an object with a "value" property.
+#[derive(serde::Deserialize)]
+struct ValueWrapper<T> {
+    value: T,
+}
+
 impl<T> CompletionTarget for T
 where
     T: DeserializeOwned + JsonSchema + Send,
@@ -275,8 +316,41 @@ where
         responses::create_format_for_type::<T>()
     }
 
-    fn parse_response(res: Response, provider: Provider) -> Result<Self::Output, LlmError> {
-        responses::create_core_structured_response(res, provider)
+    fn parse_response(res: ProviderResponse) -> Result<Self::Output, LlmError> {
+        match res.content {
+            ResponseContent::Text(text) => {
+                // Try to parse as wrapped value first, then fall back to direct parsing
+                let parsed_content: T =
+                    if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(&text) {
+                        wrapped.value
+                    } else {
+                        serde_json::from_str(&text).map_err(|e| LlmError::Parse {
+                            message: "Failed to parse structured output".to_string(),
+                            source: Box::new(e),
+                        })?
+                    };
+
+                Ok(StructuredResponse {
+                    content: parsed_content,
+                    usage: res.usage,
+                    metadata: ResponseMetadata {
+                        provider: res.provider,
+                        model: res.model,
+                        id: res.id,
+                    },
+                })
+            }
+            ResponseContent::FunctionCalls(_) => Err(LlmError::Provider {
+                message: "Function call response received when expecting structured output"
+                    .to_string(),
+                source: None,
+            }),
+            ResponseContent::Refusal(refusal) => Err(LlmError::Api {
+                message: format!("Model refused: {}", refusal),
+                status_code: None,
+                source: None,
+            }),
+        }
     }
 }
 
@@ -287,8 +361,27 @@ impl CompletionTarget for TextResponse {
         Ok(responses::create_text_format())
     }
 
-    fn parse_response(res: Response, provider: Provider) -> Result<Self::Output, LlmError> {
-        responses::create_core_text_response(res, provider)
+    fn parse_response(res: ProviderResponse) -> Result<Self::Output, LlmError> {
+        match res.content {
+            ResponseContent::Text(text) => Ok(TextResponse {
+                text,
+                usage: res.usage,
+                metadata: ResponseMetadata {
+                    provider: res.provider,
+                    model: res.model,
+                    id: res.id,
+                },
+            }),
+            ResponseContent::FunctionCalls(_) => Err(LlmError::Provider {
+                message: "Function call response received when expecting text output".to_string(),
+                source: None,
+            }),
+            ResponseContent::Refusal(refusal) => Err(LlmError::Api {
+                message: format!("Model refused: {}", refusal),
+                status_code: None,
+                source: None,
+            }),
+        }
     }
 
     fn supports_tools() -> bool {

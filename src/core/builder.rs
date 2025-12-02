@@ -3,7 +3,7 @@ use std::{env, marker::PhantomData};
 use tracing::{debug, instrument};
 
 use crate::{
-    provider::{Provider, openai, openrouter},
+    provider::{Provider, gemini, openai, openrouter},
     responses::HttpClientConfig,
 };
 
@@ -331,6 +331,31 @@ impl<State: private::Completable> LlmBuilder<State> {
                     }),
                 };
                 let client = openrouter::create_openrouter_client_from_builder(&self)?;
+                client
+                    .generate_completion::<T>(req, format, self.fields.tool_registry.as_ref())
+                    .await
+            }
+            Provider::Gemini => {
+                let conversation_messages: Vec<ConversationMessage> = messages
+                    .into_iter()
+                    .map(ConversationMessage::Chat)
+                    .collect();
+
+                let req = StructuredRequest {
+                    model: model_string,
+                    messages: conversation_messages,
+                    tool_config: tool_schemas.map(|tools| ToolConfig {
+                        tools: Some(tools),
+                        tool_choice: self.fields.tool_choice.clone(),
+                        parallel_tool_calls: self.fields.parallel_tool_calls,
+                    }),
+                    generation_config: Some(GenerationConfig {
+                        max_tokens: self.fields.max_tokens,
+                        temperature: self.fields.temperature,
+                        top_p: self.fields.top_p,
+                    }),
+                };
+                let client = gemini::create_gemini_client_from_builder(&self)?;
                 client
                     .generate_completion::<T>(req, format, self.fields.tool_registry.as_ref())
                     .await

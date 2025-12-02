@@ -1,13 +1,10 @@
 use async_trait::async_trait;
 
-use crate::{
-    Provider,
-    responses::{request::Format, response::Response},
-};
+use crate::responses::request::Format;
 
 use super::{
     error::LlmError,
-    types::{BoxFuture, StructuredRequest, Tool, ToolRegistry},
+    types::{BoxFuture, ProviderResponse, StructuredRequest, Tool, ToolRegistry},
 };
 
 #[async_trait]
@@ -35,7 +32,8 @@ pub trait CompletionTarget: Sized + Send {
 
     fn format() -> Result<Format, LlmError>;
 
-    fn parse_response(res: Response, provider: Provider) -> Result<Self::Output, LlmError>;
+    /// Parse a provider-agnostic response into the target output type.
+    fn parse_response(res: ProviderResponse) -> Result<Self::Output, LlmError>;
 
     fn supports_tools() -> bool {
         true

@@ -186,7 +186,9 @@ impl LlmProvider for OpenAiClient {
             .responses_client
             .make_api_request(responses_request)
             .await?;
-        T::parse_response(api_response, super::Provider::OpenAI)
+        let provider_response =
+            crate::responses::convert_to_provider_response(api_response, super::Provider::OpenAI)?;
+        T::parse_response(provider_response)
     }
 }
 
