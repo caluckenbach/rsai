@@ -160,9 +160,4 @@ impl HttpClient {
             source: None,
         }))
     }
-
-    /// Get the underlying configuration
-    pub fn config(&self) -> &HttpClientConfig {
-        &self.config
-    }
 }

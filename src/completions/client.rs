@@ -5,7 +5,6 @@
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    Provider,
     core::{
         FunctionCallData, HttpClient, HttpClientConfig, LlmError, ProviderResponse,
         StructuredRequest, ToolCall, ToolCallingGuard, ToolRegistry,
@@ -40,15 +39,6 @@ pub trait CompletionRequestBuilder: Send + Sync {
     /// Extract function calls from the response for tool calling loop.
     /// Returns None if no function calls are present.
     fn extract_function_calls(&self, response: &Self::Response) -> Option<Vec<FunctionCallData>>;
-
-    /// Build a request with tool call results appended to the conversation.
-    fn build_request_with_tool_results(
-        &self,
-        request: &StructuredRequest,
-        format: &Format,
-        conversation: &[ConversationItem],
-        tool_results: &[(String, serde_json::Value)],
-    ) -> Result<Self::Request, LlmError>;
 }
 
 /// An item in the conversation history for the tool calling loop.
@@ -71,9 +61,6 @@ pub enum ConversationItem {
 
 /// Configuration trait for completion-style providers.
 pub trait CompletionProviderConfig {
-    /// Get the provider type
-    fn provider(&self) -> Provider;
-
     /// Get the base URL for the API
     fn base_url(&self) -> &str;
 

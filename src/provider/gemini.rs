@@ -193,10 +193,6 @@ impl GeminiConfig {
 }
 
 impl CompletionProviderConfig for GeminiConfig {
-    fn provider(&self) -> super::Provider {
-        super::Provider::Gemini
-    }
-
     fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -303,17 +299,6 @@ impl CompletionRequestBuilder for GeminiRequestBuilder {
 
         if calls.is_empty() { None } else { Some(calls) }
     }
-
-    fn build_request_with_tool_results(
-        &self,
-        request: &StructuredRequest,
-        format: &Format,
-        conversation: &[ConversationItem],
-        _tool_results: &[(String, Value)],
-    ) -> Result<Self::Request, LlmError> {
-        // Tool results are already included in the conversation
-        self.build_request(request, format, conversation)
-    }
 }
 
 // ============================================================================
@@ -389,10 +374,10 @@ fn find_function_name_by_call_id(
     call_id: &str,
 ) -> Option<String> {
     for item in conversation {
-        if let ConversationItem::FunctionCall { id, name, .. } = item {
-            if id == call_id {
-                return Some(name.clone());
-            }
+        if let ConversationItem::FunctionCall { id, name, .. } = item
+            && id == call_id
+        {
+            return Some(name.clone());
         }
     }
     None
