@@ -1,7 +1,9 @@
 mod constants;
+pub(crate) mod gemini;
 pub(crate) mod openai;
 pub(crate) mod openrouter;
 
+pub use gemini::{GeminiClient, GeminiConfig};
 pub use openai::{OpenAiClient, OpenAiConfig};
 pub use openrouter::{OpenRouterClient, OpenRouterConfig};
 
@@ -9,6 +11,7 @@ pub use openrouter::{OpenRouterClient, OpenRouterConfig};
 pub enum Provider {
     OpenAI,
     OpenRouter,
+    Gemini,
 }
 
 impl std::fmt::Display for Provider {
@@ -16,6 +19,7 @@ impl std::fmt::Display for Provider {
         match self {
             Provider::OpenAI => write!(f, "OpenAI"),
             Provider::OpenRouter => write!(f, "OpenRouter"),
+            Provider::Gemini => write!(f, "Gemini"),
         }
     }
 }
@@ -26,6 +30,7 @@ impl Provider {
         match self {
             Provider::OpenAI => constants::openai::API_KEY_ENV_VAR,
             Provider::OpenRouter => constants::openrouter::API_KEY_ENV_VAR,
+            Provider::Gemini => constants::gemini::API_KEY_ENV_VAR,
         }
     }
 }

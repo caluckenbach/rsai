@@ -9,3 +9,8 @@ pub mod openrouter {
     pub const RESPONSES_ENDPOINT: &str = "/responses";
     pub const API_KEY_ENV_VAR: &str = "OPENROUTER_API_KEY";
 }
+
+pub mod gemini {
+    pub const API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
+    pub const API_KEY_ENV_VAR: &str = "GEMINI_API_KEY";
+}
