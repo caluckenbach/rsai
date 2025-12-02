@@ -44,11 +44,46 @@ pub struct Content {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(untagged)]
 pub enum Part {
-    Text { text: String },
-    FunctionCall { function_call: FunctionCall },
-    FunctionResponse { function_response: FunctionResponse },
+    Text(TextPart),
+    FunctionCall(FunctionCallPart),
+    FunctionResponse(FunctionResponsePart),
+}
+
+impl Part {
+    pub fn text(s: String) -> Self {
+        Self::Text(TextPart { text: s })
+    }
+
+    pub fn function_call(name: String, args: Value) -> Self {
+        Self::FunctionCall(FunctionCallPart {
+            function_call: FunctionCall { name, args },
+        })
+    }
+
+    pub fn function_response(name: String, response: Value) -> Self {
+        Self::FunctionResponse(FunctionResponsePart {
+            function_response: FunctionResponse { name, response },
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TextPart {
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionCallPart {
+    pub function_call: FunctionCall,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunctionResponsePart {
+    pub function_response: FunctionResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -227,6 +262,14 @@ impl CompletionRequestBuilder for GeminiRequestBuilder {
         let generation_config = build_generation_config(request, format);
         let (tools, tool_config) = build_tools_config(request);
 
+        // Gemini doesn't support combining function calling with structured JSON output
+        if tools.is_some() && matches!(format.format, FormatType::JsonSchema(_)) {
+            return Err(LlmError::ProviderConfiguration(
+                "Gemini does not support combining function calling with structured JSON output. \
+                 Use TextResponse with tools, or structured output without tools.".to_string()
+            ));
+        }
+
         Ok(GeminiRequest {
             contents,
             generation_config,
@@ -288,7 +331,7 @@ impl CompletionRequestBuilder for GeminiRequestBuilder {
 
         let mut calls = Vec::new();
         for (idx, part) in content.parts.iter().enumerate() {
-            if let Part::FunctionCall { function_call } = part {
+            if let Part::FunctionCall(FunctionCallPart { function_call }) = part {
                 calls.push(FunctionCallData {
                     id: format!("call_{}", idx),
                     name: function_call.name.clone(),
@@ -317,9 +360,7 @@ fn build_contents_from_conversation(
                 if role == "system" {
                     system_instruction = Some(Content {
                         role: None,
-                        parts: vec![Part::Text {
-                            text: content.clone(),
-                        }],
+                        parts: vec![Part::text(content.clone())],
                     });
                 } else {
                     let gemini_role = match role.as_str() {
@@ -329,9 +370,7 @@ fn build_contents_from_conversation(
                     };
                     contents.push(Content {
                         role: Some(gemini_role.to_string()),
-                        parts: vec![Part::Text {
-                            text: content.clone(),
-                        }],
+                        parts: vec![Part::text(content.clone())],
                     });
                 }
             }
@@ -340,27 +379,24 @@ fn build_contents_from_conversation(
             } => {
                 contents.push(Content {
                     role: Some("model".to_string()),
-                    parts: vec![Part::FunctionCall {
-                        function_call: FunctionCall {
-                            name: name.clone(),
-                            args: arguments.clone(),
-                        },
-                    }],
+                    parts: vec![Part::function_call(name.clone(), arguments.clone())],
                 });
             }
             ConversationItem::FunctionResult { call_id, result } => {
                 // For Gemini, we need to find the function name from previous calls
-                // We use the call_id to find the corresponding function name
                 let name = find_function_name_by_call_id(conversation, call_id)
                     .unwrap_or_else(|| call_id.clone());
+
+                // Gemini requires function_response.response to be a Struct (object).
+                // Wrap non-object values in a result wrapper.
+                let response_value = match result {
+                    Value::Object(_) => result.clone(),
+                    other => serde_json::json!({ "result": other }),
+                };
+
                 contents.push(Content {
                     role: Some("user".to_string()),
-                    parts: vec![Part::FunctionResponse {
-                        function_response: FunctionResponse {
-                            name,
-                            response: result.clone(),
-                        },
-                    }],
+                    parts: vec![Part::function_response(name, response_value)],
                 });
             }
         }
@@ -383,6 +419,56 @@ fn find_function_name_by_call_id(
     None
 }
 
+/// Convert standard JSON Schema to Gemini's schema format.
+///
+/// Gemini uses a simplified schema with uppercase type names and fewer fields.
+/// If multiple providers adopt this format in the future, this should become
+/// the default schema format, with OpenAI doing its own conversion.
+fn convert_to_gemini_schema(schema: &Value) -> Value {
+    match schema {
+        Value::Object(obj) => {
+            let mut result = serde_json::Map::new();
+
+            for (key, value) in obj {
+                match key.as_str() {
+                    // Skip unsupported fields
+                    "$schema" | "additionalProperties" | "title" => continue,
+                    // Convert type to uppercase
+                    "type" => {
+                        if let Value::String(t) = value {
+                            result.insert(
+                                "type".to_string(),
+                                Value::String(t.to_uppercase()),
+                            );
+                        }
+                    }
+                    // Recurse into nested schemas
+                    "properties" => {
+                        if let Value::Object(props) = value {
+                            let converted: serde_json::Map<String, Value> = props
+                                .iter()
+                                .map(|(k, v)| (k.clone(), convert_to_gemini_schema(v)))
+                                .collect();
+                            result.insert("properties".to_string(), Value::Object(converted));
+                        }
+                    }
+                    "items" => {
+                        result.insert("items".to_string(), convert_to_gemini_schema(value));
+                    }
+                    // Pass through supported fields
+                    "required" | "enum" | "description" => {
+                        result.insert(key.clone(), value.clone());
+                    }
+                    _ => {}
+                }
+            }
+
+            Value::Object(result)
+        }
+        other => other.clone(),
+    }
+}
+
 fn build_generation_config(
     request: &StructuredRequest,
     format: &Format,
@@ -392,7 +478,7 @@ fn build_generation_config(
     let (response_mime_type, response_schema) = match &format.format {
         FormatType::JsonSchema(json_schema) => (
             Some("application/json".to_string()),
-            Some(json_schema.schema.clone()),
+            Some(convert_to_gemini_schema(&json_schema.schema)),
         ),
         FormatType::Text { .. } => (None, None),
     };
@@ -431,7 +517,7 @@ fn build_tools_config(
         .map(|t| GeminiFunctionDeclaration {
             name: t.name.clone(),
             description: t.description.clone(),
-            parameters: t.parameters.clone(),
+            parameters: convert_to_gemini_schema(&t.parameters),
         })
         .collect();
 
@@ -475,17 +561,15 @@ fn parse_parts_to_content(parts: &[Part]) -> Result<ResponseContent, LlmError> {
 
     for (idx, part) in parts.iter().enumerate() {
         match part {
-            Part::Text { text } => text_parts.push(text.clone()),
-            Part::FunctionCall { function_call } => {
+            Part::Text(TextPart { text }) => text_parts.push(text.clone()),
+            Part::FunctionCall(FunctionCallPart { function_call }) => {
                 function_calls.push(FunctionCallData {
                     id: format!("call_{}", idx),
                     name: function_call.name.clone(),
                     arguments: function_call.args.clone(),
                 });
             }
-            Part::FunctionResponse { .. } => {
-                // Response shouldn't contain function responses
-            }
+            Part::FunctionResponse(_) => {}
         }
     }
 
