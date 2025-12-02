@@ -7,14 +7,11 @@
 //! - Serializing tools and generating JSON schemas
 //! - Parsing API responses back to core types
 
-use std::time::Duration;
-
 use crate::{
     CompletionTarget, Provider,
     core::{
-        ChatRole, ConversationMessage, LanguageModelUsage, LlmError, ResponseMetadata,
-        StructuredRequest, StructuredResponse, TextResponse, Tool, ToolCall, ToolCallingGuard,
-        ToolRegistry,
+        ChatRole, ConversationMessage, HttpClient, LlmError, StructuredRequest, Tool, ToolCall,
+        ToolCallingGuard, ToolRegistry,
     },
     responses::{
         Format, FormatType, FunctionToolCall, FunctionToolCallOutput, JsonSchema, JsonSchemaType,
@@ -24,29 +21,10 @@ use crate::{
     },
 };
 use schemars::schema_for;
-use serde::Deserialize;
-use tracing::{self, debug, warn};
+use tracing;
 
-#[derive(Debug, Clone)]
-pub struct HttpClientConfig {
-    pub timeout: Duration,
-    pub max_retries: u32,
-    /// This is the base duration for exponential backoff
-    pub initial_retry_delay: Duration,
-    /// Cap on the backoff duration
-    pub max_retry_delay: Duration,
-}
-
-impl Default for HttpClientConfig {
-    fn default() -> Self {
-        Self {
-            timeout: Duration::from_secs(60),
-            max_retries: 3,
-            initial_retry_delay: Duration::from_millis(500),
-            max_retry_delay: Duration::from_secs(10),
-        }
-    }
-}
+// Re-export HttpClientConfig from core for backwards compatibility
+pub use crate::core::HttpClientConfig;
 
 /// Configuration trait for providers that use the OpenAI-style responses API
 pub trait ResponsesProviderConfig {
@@ -80,7 +58,7 @@ pub trait ResponsesProviderConfig {
 /// Shared client for providers using the OpenAI-style responses API
 pub struct ResponsesClient<P: ResponsesProviderConfig> {
     pub config: P,
-    client: reqwest::Client,
+    http: HttpClient,
 }
 
 impl<P: ResponsesProviderConfig> ResponsesClient<P> {
@@ -89,15 +67,9 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         let http_config = config.http_config();
         let user_agent = config.user_agent();
 
-        let client = reqwest::Client::builder()
-            .timeout(http_config.timeout)
-            .user_agent(user_agent)
-            .build()
-            .map_err(|e| {
-                LlmError::ProviderConfiguration(format!("Failed to build reqwest client: {e}"))
-            })?;
+        let http = HttpClient::new(http_config, Some(&user_agent))?;
 
-        Ok(Self { config, client })
+        Ok(Self { config, http })
     }
 
     /// Make an API request to the responses endpoint
@@ -111,99 +83,13 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         err
     )]
     pub async fn make_api_request(&self, request: Request) -> Result<Response, LlmError> {
-        let config = self.config.http_config();
-
         let url = format!("{}{}", self.config.base_url(), self.config.endpoint());
 
-        let mut last_error: Option<LlmError> = None;
-        for attempt in 0..=config.max_retries {
-            // .send() consumes the builder, so we have to rebuild it every attempt.
-            let mut req_builder = self.client.post(&url).json(&request);
+        // Build headers
+        let mut headers = vec![self.config.auth_header()];
+        headers.extend(self.config.extra_headers());
 
-            // Add authentication header
-            let (auth_name, auth_value) = self.config.auth_header();
-            req_builder = req_builder.header(&auth_name, auth_value);
-
-            // Add extra headers
-            for (name, value) in self.config.extra_headers() {
-                req_builder = req_builder.header(&name, value);
-            }
-
-            match req_builder.send().await {
-                Err(e) => {
-                    warn!(attempt, error = %e, "HTTP request failed, retrying");
-                    last_error = Some(LlmError::Network {
-                        message: format!(
-                            "Request failed (attempt {}/{}",
-                            attempt + 1,
-                            config.max_retries + 1
-                        ),
-                        source: Box::new(e),
-                    })
-                }
-                Ok(res) => {
-                    let status = res.status();
-
-                    // Success
-                    if status.is_success() {
-                        debug!(status = %status, "HTTP request successful");
-                        return res.json().await.map_err(|e| LlmError::Parse {
-                            message: "Failed to parse API response".to_string(),
-                            source: Box::new(e),
-                        });
-                    }
-
-                    warn!(attempt, status = %status, "API returned error status");
-
-                    let is_retryable = status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                        || status.is_server_error();
-                    let error_text = res
-                        .text()
-                        .await
-                        .unwrap_or_else(|_| "Unknown error".to_string());
-
-                    if !is_retryable {
-                        // Fatal errors
-                        return Err(LlmError::Api {
-                            message: format!("Fatal API Error: {error_text}"),
-                            status_code: Some(status.as_u16()),
-                            source: None,
-                        });
-                    }
-
-                    // Retryable Error: Capture and continue
-                    last_error = Some(LlmError::Api {
-                        message: format!("Transient API error ({}): {}", status, error_text),
-                        status_code: Some(status.as_u16()),
-                        source: None,
-                    })
-                }
-            }
-
-            // Exponential backoff
-            if attempt < config.max_retries {
-                let base_delay =
-                    config.initial_retry_delay.as_millis() as f64 * 2_f64.powi(attempt as i32);
-
-                // +/- 10% Jitter from 0.9 to 1.1
-                let jitter_factor = rand::random::<f64>() * 0.2 + 0.9;
-                let delay_ms = (base_delay * jitter_factor) as u64;
-
-                // Cap delay
-                let delay = std::time::Duration::from_millis(delay_ms).min(config.max_retry_delay);
-
-                tokio::time::sleep(delay).await;
-            }
-        }
-
-        Err(last_error.unwrap_or_else(|| LlmError::Api {
-            message: format!(
-                "Request failed after max retries ({}) with unknown error",
-                config.max_retries
-            ),
-            status_code: None,
-            source: None,
-        }))
+        self.http.post_json(&url, &headers, &request).await
     }
 
     /// Handle the complete tool calling loop until a final response is received
@@ -277,7 +163,9 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
 
             if function_calls.is_empty() {
                 tracing::debug!("No more tool calls, returning final response");
-                return T::parse_response(api_response, self.config.provider());
+                let provider_response =
+                    convert_to_provider_response(api_response, self.config.provider())?;
+                return T::parse_response(provider_response);
             }
 
             tracing::info!(
@@ -471,14 +359,6 @@ pub(crate) fn build_request_payload_with_format(
     Ok(req)
 }
 
-/// Wrapper for non-object JSON Schema types (enums, strings, numbers, etc.)
-/// OpenAI's structured output API requires the root schema to be an object,
-/// so we wrap non-object types in an object with a "value" property.
-#[derive(Deserialize)]
-pub(crate) struct ValueWrapper<T> {
-    value: T,
-}
-
 /// Convert core Tool to responses API Tool
 pub(crate) fn create_function_tool(tool: &Tool) -> crate::responses::Tool {
     let strict = tool.strict.unwrap_or(true);
@@ -613,123 +493,80 @@ pub(crate) fn create_text_format() -> Format {
     }
 }
 
-/// Convert API response to core structured response with specified provider
-pub(crate) fn create_core_structured_response<T>(
+/// Convert OpenAI API response to provider-agnostic ProviderResponse
+pub fn convert_to_provider_response(
     res: Response,
     provider: crate::provider::Provider,
-) -> Result<StructuredResponse<T>, LlmError>
-where
-    T: serde::de::DeserializeOwned,
-{
+) -> Result<crate::core::ProviderResponse, LlmError> {
+    use crate::core::{FunctionCallData, LanguageModelUsage, ProviderResponse, ResponseContent};
+
     let output_content = res.output.first().ok_or_else(|| LlmError::Provider {
         message: "No output in response".to_string(),
         source: None,
     })?;
 
-    match output_content {
+    let content = match output_content {
         OutputContent::OutputMessage(message) => {
-            let content = message.content.first().ok_or_else(|| LlmError::Provider {
+            let msg_content = message.content.first().ok_or_else(|| LlmError::Provider {
                 message: "No content in message".to_string(),
                 source: None,
             })?;
 
-            let text = match content {
-                MessageContent::OutputText(output) => &output.text,
+            match msg_content {
+                MessageContent::OutputText(output) => ResponseContent::Text(output.text.clone()),
                 MessageContent::Refusal(refusal) => {
-                    return Err(LlmError::Api {
-                        message: format!("Model refused: {}", refusal.refusal),
-                        status_code: None,
-                        source: None,
-                    });
+                    ResponseContent::Refusal(refusal.refusal.clone())
                 }
-            };
-
-            // Try to parse as wrapped value first, then fall back to direct parsing
-            let parsed_content: T =
-                if let Ok(wrapped) = serde_json::from_str::<ValueWrapper<T>>(text) {
-                    wrapped.value
-                } else {
-                    serde_json::from_str(text).map_err(|e| LlmError::Parse {
-                        message: "Failed to parse structured output".to_string(),
-                        source: Box::new(e),
-                    })?
-                };
-
-            Ok(StructuredResponse {
-                content: parsed_content,
-                usage: LanguageModelUsage {
-                    prompt_tokens: res.usage.input_tokens,
-                    completion_tokens: res.usage.output_tokens,
-                    total_tokens: res.usage.total_tokens,
-                },
-                metadata: ResponseMetadata {
-                    provider,
-                    model: res.model,
-                    id: res.id,
-                },
-            })
+            }
         }
-        OutputContent::FunctionCall(_) => Err(LlmError::Provider {
-            message: "Function call response received when expecting structured output".to_string(),
-            source: None,
-        }),
-    }
-}
+        OutputContent::FunctionCall(fc) => {
+            // Collect all function calls from the output
+            let function_calls: Vec<FunctionCallData> = res
+                .output
+                .iter()
+                .filter_map(|o| match o {
+                    OutputContent::FunctionCall(fc) => Some(FunctionCallData {
+                        id: fc.call_id.clone(),
+                        name: fc.name.clone(),
+                        arguments: fc.arguments.clone(),
+                    }),
+                    _ => None,
+                })
+                .collect();
 
-/// Convert API response to a plain text response
-pub(crate) fn create_core_text_response(
-    res: Response,
-    provider: crate::provider::Provider,
-) -> Result<TextResponse, LlmError> {
-    let output_content = res.output.first().ok_or_else(|| LlmError::Provider {
-        message: "No output in response".to_string(),
-        source: None,
-    })?;
-
-    match output_content {
-        OutputContent::OutputMessage(message) => {
-            let content = message.content.first().ok_or_else(|| LlmError::Provider {
-                message: "No content in message".to_string(),
-                source: None,
-            })?;
-
-            let text = match content {
-                MessageContent::OutputText(output) => output.text.clone(),
-                MessageContent::Refusal(refusal) => {
-                    return Err(LlmError::Api {
-                        message: format!("Model refused: {}", refusal.refusal),
-                        status_code: None,
-                        source: None,
-                    });
-                }
-            };
-
-            Ok(TextResponse {
-                text,
-                usage: LanguageModelUsage {
-                    prompt_tokens: res.usage.input_tokens,
-                    completion_tokens: res.usage.output_tokens,
-                    total_tokens: res.usage.total_tokens,
-                },
-                metadata: ResponseMetadata {
-                    provider,
-                    model: res.model,
-                    id: res.id,
-                },
-            })
+            if function_calls.is_empty() {
+                // This shouldn't happen since we matched FunctionCall, but handle it
+                ResponseContent::FunctionCalls(vec![FunctionCallData {
+                    id: fc.call_id.clone(),
+                    name: fc.name.clone(),
+                    arguments: fc.arguments.clone(),
+                }])
+            } else {
+                ResponseContent::FunctionCalls(function_calls)
+            }
         }
-        OutputContent::FunctionCall(_) => Err(LlmError::Provider {
-            message: "Function call response received when expecting text output".to_string(),
-            source: None,
-        }),
-    }
+    };
+
+    Ok(ProviderResponse {
+        id: res.id,
+        model: res.model,
+        provider,
+        content,
+        usage: LanguageModelUsage {
+            prompt_tokens: res.usage.input_tokens,
+            completion_tokens: res.usage.output_tokens,
+            total_tokens: res.usage.total_tokens,
+        },
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::completion_schema;
-    use crate::core::{ChatRole, ConversationMessage, Message, StructuredRequest, ToolRegistry};
+    use crate::core::{
+        ChatRole, ConversationMessage, Message, StructuredRequest, StructuredResponse, ToolRegistry,
+    };
     use std::time::Duration;
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
