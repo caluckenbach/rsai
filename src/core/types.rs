@@ -193,8 +193,10 @@ pub struct FunctionCallData {
     pub arguments: Value,
 }
 
+type ToolMap<Ctx> = Arc<RwLock<HashMap<String, Arc<dyn ToolFunction<Ctx>>>>>;
+
 pub struct ToolRegistry<Ctx = ()> {
-    tools: Arc<RwLock<HashMap<String, Arc<dyn ToolFunction<Ctx>>>>>,
+    tools: ToolMap<Ctx>,
     context: Arc<Ctx>,
 }
 

@@ -31,3 +31,4 @@
 - Add specific provider examples in the examples directory
 - Write both unit tests (mocking API responses) and integration tests
 - always run `cargo fmt` before commiting code
+- run `cargo clippy --all --all-features -- -Dwarnings` before committing

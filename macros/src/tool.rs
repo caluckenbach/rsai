@@ -50,7 +50,24 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     // Generate the execution code
     let execute_impl = generate_execute_impl(fn_name, &context_param, &params, is_async)?;
 
-    // Generate different trait implementations based on whether there's a context param
+    // Generate inherent impl with schema() method.
+    // This allows calling .schema() without type annotations since Rust prefers
+    // inherent methods over trait methods during method resolution.
+    let inherent_impl = quote! {
+        impl #wrapper_name {
+            pub fn schema(&self) -> rsai::Tool {
+                use rsai::Tool;
+                Tool {
+                    name: #fn_name_str.to_string(),
+                    description: #description,
+                    parameters: #schema,
+                    strict: Some(true),
+                }
+            }
+        }
+    };
+
+    // Generate trait implementation based on whether there's a context param
     let trait_impl = if let Some(ctx_param) = &context_param {
         // Tool with context: impl<Ctx> ToolFunction<Ctx> for Tool where Ctx: AsRef<ContextType>
         let ctx_inner_ty = &ctx_param.inner_ty;
@@ -60,13 +77,7 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
                 __Ctx: AsRef<#ctx_inner_ty> + Send + Sync,
             {
                 fn schema(&self) -> rsai::Tool {
-                    use rsai::Tool;
-                    Tool {
-                        name: #fn_name_str.to_string(),
-                        description: #description,
-                        parameters: #schema,
-                        strict: Some(true),
-                    }
+                    #wrapper_name::schema(self)
                 }
 
                 fn execute<'a>(&'a self, __ctx: &'a __Ctx, params: ::serde_json::Value) -> rsai::BoxFuture<'a, Result<::serde_json::Value, rsai::LlmError>> {
@@ -82,13 +93,7 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
         quote! {
             impl<__Ctx: Send + Sync> rsai::ToolFunction<__Ctx> for #wrapper_name {
                 fn schema(&self) -> rsai::Tool {
-                    use rsai::Tool;
-                    Tool {
-                        name: #fn_name_str.to_string(),
-                        description: #description,
-                        parameters: #schema,
-                        strict: Some(true),
-                    }
+                    #wrapper_name::schema(self)
                 }
 
                 fn execute<'a>(&'a self, __ctx: &'a __Ctx, params: ::serde_json::Value) -> rsai::BoxFuture<'a, Result<::serde_json::Value, rsai::LlmError>> {
@@ -108,6 +113,8 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
 
         #[derive(Clone)]
         pub struct #wrapper_name;
+
+        #inherent_impl
 
         #trait_impl
     };
