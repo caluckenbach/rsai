@@ -14,8 +14,8 @@
 use crate::provider::constants::openai;
 
 use crate::core::{
-    LlmBuilder, LlmError, LlmProvider, StructuredRequest, ToolCallingConfig, ToolCallingGuard,
-    ToolRegistry,
+    InspectorConfig, LlmBuilder, LlmError, LlmProvider, StructuredRequest, ToolCallingConfig,
+    ToolCallingGuard, ToolRegistry,
 };
 use crate::responses::{HttpClientConfig, ResponsesClient, ResponsesProviderConfig};
 use async_trait::async_trait;
@@ -27,6 +27,8 @@ pub struct OpenAiConfig {
     /// Configuration for tool calling limits
     pub tool_calling_config: Option<ToolCallingConfig>,
     pub http_config: HttpClientConfig,
+    /// Configuration for request/response inspection
+    pub inspector_config: Option<InspectorConfig>,
 }
 
 impl OpenAiConfig {
@@ -36,7 +38,13 @@ impl OpenAiConfig {
             base_url: openai::API_BASE.to_string(),
             tool_calling_config: Some(ToolCallingConfig::default()),
             http_config: HttpClientConfig::default(),
+            inspector_config: None,
         }
+    }
+
+    pub fn with_inspector_config(mut self, config: InspectorConfig) -> Self {
+        self.inspector_config = Some(config);
+        self
     }
 
     pub fn with_base_url(mut self, base_url: String) -> Self {
@@ -86,6 +94,10 @@ impl ResponsesProviderConfig for OpenAiConfig {
     fn http_config(&self) -> HttpClientConfig {
         self.http_config.clone()
     }
+
+    fn inspector_config(&self) -> Option<&InspectorConfig> {
+        self.inspector_config.as_ref()
+    }
 }
 
 impl OpenAiConfig {
@@ -115,6 +127,7 @@ impl OpenAiClient {
             base_url,
             tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
             http_config: self.responses_client.config.http_config.clone(),
+            inspector_config: self.responses_client.config.inspector_config.clone(),
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -128,6 +141,7 @@ impl OpenAiClient {
             base_url: base_url.clone(),
             tool_calling_config: Some(config),
             http_config: self.responses_client.config.http_config.clone(),
+            inspector_config: self.responses_client.config.inspector_config.clone(),
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -143,6 +157,7 @@ impl OpenAiClient {
             base_url: base_url.clone(),
             tool_calling_config: tool_config.clone(),
             http_config: config,
+            inspector_config: self.responses_client.config.inspector_config.clone(),
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -202,8 +217,12 @@ pub fn create_openai_client_from_builder<State>(
 
     let mut config = OpenAiConfig::new(api_key);
 
-    if let Some(http_config) = &builder.get_http_config() {
-        config = config.with_http_config((*http_config).clone());
+    if let Some(http_config) = builder.get_http_config() {
+        config = config.with_http_config(http_config.clone());
+    }
+
+    if let Some(inspector_config) = builder.get_inspector_config() {
+        config = config.with_inspector_config(inspector_config.clone());
     }
 
     let client = ResponsesClient::new(config)?;

@@ -5,7 +5,7 @@ mod tool_guard;
 mod traits;
 mod types;
 
-pub use builder::{ApiKey, LlmBuilder, llm};
+pub use builder::{ApiKey, Inspector, InspectorConfig, LlmBuilder, llm};
 
 pub use error::LlmError;
 pub use http::{HttpClient, HttpClientConfig};

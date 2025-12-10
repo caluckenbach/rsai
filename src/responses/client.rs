@@ -10,8 +10,8 @@
 use crate::{
     CompletionTarget, Provider,
     core::{
-        ChatRole, ConversationMessage, HttpClient, LlmError, StructuredRequest, Tool, ToolCall,
-        ToolCallingGuard, ToolRegistry,
+        ChatRole, ConversationMessage, HttpClient, InspectorConfig, LlmError, StructuredRequest,
+        Tool, ToolCall, ToolCallingGuard, ToolRegistry,
     },
     responses::{
         Format, FormatType, FunctionToolCall, FunctionToolCallOutput, JsonSchema, JsonSchemaType,
@@ -53,6 +53,11 @@ pub trait ResponsesProviderConfig {
     fn user_agent(&self) -> String {
         format!("rsai/{}", env!("CARGO_PKG_VERSION"))
     }
+
+    /// Get the inspector configuration for request/response logging.
+    fn inspector_config(&self) -> Option<&InspectorConfig> {
+        None
+    }
 }
 
 /// Shared client for providers using the OpenAI-style responses API
@@ -66,8 +71,9 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     pub fn new(config: P) -> Result<Self, LlmError> {
         let http_config = config.http_config();
         let user_agent = config.user_agent();
+        let inspector_config = config.inspector_config().cloned();
 
-        let http = HttpClient::new(http_config, Some(&user_agent), None)?;
+        let http = HttpClient::new(http_config, Some(&user_agent), inspector_config)?;
 
         Ok(Self { config, http })
     }
