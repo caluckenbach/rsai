@@ -1,129 +1,97 @@
-//! Example demonstrating dependency injection for tools using context.
+//! Dependency injection for tools via context.
 //!
-//! This example shows how to pass external resources (like database connections,
-//! HTTP clients, or configuration) to tools via context injection instead of
-//! relying on global state.
+//! Tools can receive external resources (DB connections, HTTP clients, config)
+//! through a shared context instead of using global state.
 //!
 //! Run with: `cargo run --example tool-context`
 
-use rsai::{Ctx, ToolCall, ToolSet, tool, toolset};
-use std::sync::atomic::{AtomicU32, Ordering};
+use rsai::{ApiKey, ChatRole, Ctx, Message, Provider, TextResponse, llm, tool, toolset};
 
-// =============================================================================
-// Mock Resources
-// =============================================================================
-
-struct DatabasePool {
-    query_count: AtomicU32,
+// A mock database that tools can access
+struct Database {
+    data: Vec<(&'static str, &'static str)>,
 }
 
-impl DatabasePool {
+impl Database {
     fn new() -> Self {
         Self {
-            query_count: AtomicU32::new(0),
+            data: vec![
+                ("rust", "A systems programming language focused on safety."),
+                ("tokio", "An async runtime for Rust."),
+                ("serde", "A serialization framework for Rust."),
+            ],
         }
     }
 
     fn search(&self, query: &str) -> Vec<String> {
-        let count = self.query_count.fetch_add(1, Ordering::Relaxed);
-        vec![
-            format!("Result 1 for '{}'", query),
-            format!("Result 2 for '{}'", query),
-            format!("(Query #{} on this connection)", count + 1),
-        ]
+        self.data
+            .iter()
+            .filter(|(k, _)| k.contains(&query.to_lowercase()))
+            .map(|(k, v)| format!("{}: {}", k, v))
+            .collect()
     }
 }
 
-// =============================================================================
-// Application Context
-// =============================================================================
-
+// Context struct that holds all dependencies
 struct AppContext {
-    db: DatabasePool,
+    db: Database,
 }
 
-impl AsRef<DatabasePool> for AppContext {
-    fn as_ref(&self) -> &DatabasePool {
+// Tools access specific dependencies via AsRef
+impl AsRef<Database> for AppContext {
+    fn as_ref(&self) -> &Database {
         &self.db
     }
 }
 
-// =============================================================================
-// Tools
-// =============================================================================
-
+// Tool with context injection - receives Database via Ctx<&Database>
 #[tool]
-/// Search the database for documents.
-/// query: The search query.
-fn search(db: Ctx<&DatabasePool>, query: String) -> Vec<String> {
+/// Search the knowledge base for information.
+/// query: The search term.
+fn search_docs(db: Ctx<&Database>, query: String) -> Vec<String> {
     db.search(&query)
 }
 
+// Tool without context - works alongside context-aware tools
 #[tool]
-/// Add two numbers (no context needed).
+/// Add two numbers together.
 /// a: First number.
 /// b: Second number.
 fn add(a: i32, b: i32) -> i32 {
     a + b
 }
 
-// =============================================================================
-// Main
-// =============================================================================
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv::dotenv().ok();
+
     // Create context with dependencies
-    let context = AppContext {
-        db: DatabasePool::new(),
+    let ctx = AppContext {
+        db: Database::new(),
     };
 
-    // Create toolset with context: `ContextType => tools...`
-    let tools: ToolSet<AppContext> = toolset![AppContext => search, add].with_context(context);
+    // Create toolset with context type: `ContextType => tools...`
+    let tools = toolset![AppContext => search_docs, add].with_context(ctx);
 
-    // Show tool schemas (context params are excluded)
-    println!("=== Tool Schemas ===");
-    for schema in tools.tools()? {
-        println!("  {} - {:?}", schema.name, schema.description);
-        println!("    params: {}", schema.parameters);
-    }
-
-    // Execute tools directly (simulating what LLM would do)
-    println!("\n=== Executing Tools ===");
-
-    let result = tools
-        .registry
-        .execute(&ToolCall {
-            id: "1".into(),
-            call_id: "1".into(),
-            name: "search".into(),
-            arguments: serde_json::json!({ "query": "rust programming" }),
-        })
+    let response = llm::with(Provider::Gemini)
+        .api_key(ApiKey::Default)?
+        .model("gemini-2.5-flash")
+        .messages(vec![
+            Message {
+                role: ChatRole::System,
+                content:
+                    "You have access to a knowledge base. Use search_docs to find information."
+                        .into(),
+            },
+            Message {
+                role: ChatRole::User,
+                content: "What can you tell me about Rust?".into(),
+            },
+        ])
+        .tools(tools)
+        .complete::<TextResponse>()
         .await?;
-    println!("search('rust programming') = {}", result);
 
-    let result = tools
-        .registry
-        .execute(&ToolCall {
-            id: "2".into(),
-            call_id: "2".into(),
-            name: "add".into(),
-            arguments: serde_json::json!({ "a": 10, "b": 32 }),
-        })
-        .await?;
-    println!("add(10, 32) = {}", result);
-
-    // Execute search again to show context is shared (query count increases)
-    let result = tools
-        .registry
-        .execute(&ToolCall {
-            id: "3".into(),
-            call_id: "3".into(),
-            name: "search".into(),
-            arguments: serde_json::json!({ "query": "dependency injection" }),
-        })
-        .await?;
-    println!("search('dependency injection') = {}", result);
-
+    println!("{}", response.text);
     Ok(())
 }
