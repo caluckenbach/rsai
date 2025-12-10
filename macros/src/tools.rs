@@ -14,11 +14,12 @@ struct ToolsList {
 impl Parse for ToolsList {
     fn parse(input: ParseStream) -> Result<Self> {
         // Try to parse "Type =>" prefix for context-aware toolsets
-        let context_type = if input.peek2(Token![=>]) || (input.peek(syn::Ident) && {
-            // Look ahead to check if it's a type followed by =>
-            let fork = input.fork();
-            fork.parse::<Type>().is_ok() && fork.peek(Token![=>])
-        }) {
+        let context_type = if input.peek2(Token![=>])
+            || (input.peek(syn::Ident) && {
+                // Look ahead to check if it's a type followed by =>
+                let fork = input.fork();
+                fork.parse::<Type>().is_ok() && fork.peek(Token![=>])
+            }) {
             let ty = input.parse::<Type>()?;
             input.parse::<Token![=>]>()?;
             Some(ty)
@@ -38,7 +39,10 @@ impl Parse for ToolsList {
             }
         }
 
-        Ok(ToolsList { context_type, tools })
+        Ok(ToolsList {
+            context_type,
+            tools,
+        })
     }
 }
 
@@ -69,9 +73,7 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
     let wrapper_names: Vec<_> = tools_list
         .tools
         .iter()
-        .map(|tool_name| {
-            quote::format_ident!("{}Tool", to_pascal_case(&tool_name.to_string()))
-        })
+        .map(|tool_name| quote::format_ident!("{}Tool", to_pascal_case(&tool_name.to_string())))
         .collect();
 
     // Generate different code based on whether context is present

@@ -1,5 +1,4 @@
 use crate::core::{LlmError, traits::CompletionTarget, traits::ToolFunction};
-use std::marker::PhantomData;
 use crate::provider::Provider;
 use crate::responses::{self, request::Format};
 use schemars::JsonSchema;
@@ -7,6 +6,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
+use std::marker::PhantomData;
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
@@ -307,7 +307,8 @@ impl<Ctx: Send + Sync + 'static> ToolRegistry<Ctx> {
         };
 
         let result = if let Some(tool) = tool {
-            tool.execute(&self.context, tool_call.arguments.clone()).await
+            tool.execute(&self.context, tool_call.arguments.clone())
+                .await
         } else {
             Err(LlmError::ToolNotFound(tool_call.name.clone()))
         };

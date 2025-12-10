@@ -6,7 +6,7 @@
 //!
 //! Run with: `cargo run --example tool-context`
 
-use rsai::{tool, toolset, Ctx, ToolCall, ToolSet};
+use rsai::{Ctx, ToolCall, ToolSet, tool, toolset};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 // =============================================================================
@@ -19,7 +19,9 @@ struct DatabasePool {
 
 impl DatabasePool {
     fn new() -> Self {
-        Self { query_count: AtomicU32::new(0) }
+        Self {
+            query_count: AtomicU32::new(0),
+        }
     }
 
     fn search(&self, query: &str) -> Vec<String> {
@@ -72,11 +74,12 @@ fn add(a: i32, b: i32) -> i32 {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create context with dependencies
-    let context = AppContext { db: DatabasePool::new() };
+    let context = AppContext {
+        db: DatabasePool::new(),
+    };
 
     // Create toolset with context: `ContextType => tools...`
-    let tools: ToolSet<AppContext> = toolset![AppContext => search, add]
-        .with_context(context);
+    let tools: ToolSet<AppContext> = toolset![AppContext => search, add].with_context(context);
 
     // Show tool schemas (context params are excluded)
     println!("=== Tool Schemas ===");
@@ -88,29 +91,38 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Execute tools directly (simulating what LLM would do)
     println!("\n=== Executing Tools ===");
 
-    let result = tools.registry.execute(&ToolCall {
-        id: "1".into(),
-        call_id: "1".into(),
-        name: "search".into(),
-        arguments: serde_json::json!({ "query": "rust programming" }),
-    }).await?;
+    let result = tools
+        .registry
+        .execute(&ToolCall {
+            id: "1".into(),
+            call_id: "1".into(),
+            name: "search".into(),
+            arguments: serde_json::json!({ "query": "rust programming" }),
+        })
+        .await?;
     println!("search('rust programming') = {}", result);
 
-    let result = tools.registry.execute(&ToolCall {
-        id: "2".into(),
-        call_id: "2".into(),
-        name: "add".into(),
-        arguments: serde_json::json!({ "a": 10, "b": 32 }),
-    }).await?;
+    let result = tools
+        .registry
+        .execute(&ToolCall {
+            id: "2".into(),
+            call_id: "2".into(),
+            name: "add".into(),
+            arguments: serde_json::json!({ "a": 10, "b": 32 }),
+        })
+        .await?;
     println!("add(10, 32) = {}", result);
 
     // Execute search again to show context is shared (query count increases)
-    let result = tools.registry.execute(&ToolCall {
-        id: "3".into(),
-        call_id: "3".into(),
-        name: "search".into(),
-        arguments: serde_json::json!({ "query": "dependency injection" }),
-    }).await?;
+    let result = tools
+        .registry
+        .execute(&ToolCall {
+            id: "3".into(),
+            call_id: "3".into(),
+            name: "search".into(),
+            arguments: serde_json::json!({ "query": "dependency injection" }),
+        })
+        .await?;
     println!("search('dependency injection') = {}", result);
 
     Ok(())

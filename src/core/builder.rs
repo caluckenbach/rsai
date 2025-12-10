@@ -72,7 +72,10 @@ impl BuilderFields<()> {
 
 impl<Ctx> BuilderFields<Ctx> {
     /// Create a new BuilderFields with a different context type
-    fn with_context_type<NewCtx>(self, tool_registry: Option<ToolRegistry<NewCtx>>) -> BuilderFields<NewCtx> {
+    fn with_context_type<NewCtx>(
+        self,
+        tool_registry: Option<ToolRegistry<NewCtx>>,
+    ) -> BuilderFields<NewCtx> {
         BuilderFields {
             provider: self.provider,
             api_key: self.api_key,
@@ -154,7 +157,10 @@ pub enum ApiKey {
 impl LlmBuilder<private::ProviderSet, ()> {
     /// Set the API key for the provider.
     /// Use `ApiKey::Default` to load from environment variables or `ApiKey::Custom` for a custom key.
-    pub fn api_key(mut self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet, ()>, LlmError> {
+    pub fn api_key(
+        mut self,
+        api_key: ApiKey,
+    ) -> Result<LlmBuilder<private::ApiKeySet, ()>, LlmError> {
         let key = match api_key {
             ApiKey::Default => {
                 let provider = self.fields.provider.ok_or(LlmError::Builder(

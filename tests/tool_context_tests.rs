@@ -1,6 +1,6 @@
 //! Tests for tool context/dependency injection feature.
 
-use rsai::{tool, toolset, Ctx, ToolSet, ToolCall, ToolSetBuilder};
+use rsai::{Ctx, ToolCall, ToolSet, ToolSetBuilder, tool, toolset};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 // Mock resources that tools might need
@@ -40,7 +40,6 @@ impl CacheClient {
         self.hits.fetch_add(1, Ordering::Relaxed);
         Some(format!("Cached: {}", key))
     }
-
 }
 
 // Application context struct that holds all dependencies
@@ -94,8 +93,8 @@ async fn test_context_tool_execution() {
         cache: CacheClient::new(),
     };
 
-    let toolset: ToolSet<AppContext> = toolset![AppContext => search_docs, add_numbers]
-        .with_context(context);
+    let toolset: ToolSet<AppContext> =
+        toolset![AppContext => search_docs, add_numbers].with_context(context);
 
     // Execute the search_docs tool
     let tool_call = ToolCall {
@@ -105,7 +104,11 @@ async fn test_context_tool_execution() {
         arguments: serde_json::json!({ "query": "test query" }),
     };
 
-    let result = toolset.registry.execute(&tool_call).await.expect("execution");
+    let result = toolset
+        .registry
+        .execute(&tool_call)
+        .await
+        .expect("execution");
     let results: Vec<String> = serde_json::from_value(result).expect("parse");
 
     assert_eq!(results.len(), 1);
@@ -121,8 +124,7 @@ async fn test_context_is_shared_across_calls() {
 
     let db_initial_count = context.db.get_query_count();
 
-    let toolset: ToolSet<AppContext> = toolset![AppContext => search_docs]
-        .with_context(context);
+    let toolset: ToolSet<AppContext> = toolset![AppContext => search_docs].with_context(context);
 
     // Execute the search_docs tool multiple times
     for i in 0..3 {
@@ -132,7 +134,11 @@ async fn test_context_is_shared_across_calls() {
             name: "search_docs".to_string(),
             arguments: serde_json::json!({ "query": format!("query {}", i) }),
         };
-        toolset.registry.execute(&tool_call).await.expect("execution");
+        toolset
+            .registry
+            .execute(&tool_call)
+            .await
+            .expect("execution");
     }
 
     // Verify that the context was used for all calls (query_count should be 3)
@@ -149,8 +155,8 @@ async fn test_mixed_tools_with_and_without_context() {
         cache: CacheClient::new(),
     };
 
-    let toolset: ToolSet<AppContext> = toolset![AppContext => search_docs, add_numbers]
-        .with_context(context);
+    let toolset: ToolSet<AppContext> =
+        toolset![AppContext => search_docs, add_numbers].with_context(context);
 
     // Execute context-aware tool
     let search_call = ToolCall {
@@ -159,7 +165,11 @@ async fn test_mixed_tools_with_and_without_context() {
         name: "search_docs".to_string(),
         arguments: serde_json::json!({ "query": "test" }),
     };
-    let search_result = toolset.registry.execute(&search_call).await.expect("search execution");
+    let search_result = toolset
+        .registry
+        .execute(&search_call)
+        .await
+        .expect("search execution");
     let results: Vec<String> = serde_json::from_value(search_result).expect("parse");
     assert!(!results.is_empty());
 
@@ -170,7 +180,11 @@ async fn test_mixed_tools_with_and_without_context() {
         name: "add_numbers".to_string(),
         arguments: serde_json::json!({ "a": 5, "b": 3 }),
     };
-    let add_result = toolset.registry.execute(&add_call).await.expect("add execution");
+    let add_result = toolset
+        .registry
+        .execute(&add_call)
+        .await
+        .expect("add execution");
     let sum: i32 = serde_json::from_value(add_result).expect("parse");
     assert_eq!(sum, 8);
 }
@@ -187,7 +201,11 @@ async fn test_context_free_toolset_syntax() {
         arguments: serde_json::json!({ "a": 10, "b": 20 }),
     };
 
-    let result = toolset.registry.execute(&tool_call).await.expect("execution");
+    let result = toolset
+        .registry
+        .execute(&tool_call)
+        .await
+        .expect("execution");
     let sum: i32 = serde_json::from_value(result).expect("parse");
     assert_eq!(sum, 30);
 }
@@ -205,8 +223,7 @@ fn test_tool_schemas_exclude_context_parameter() {
         cache: CacheClient::new(),
     };
 
-    let toolset: ToolSet<AppContext> = toolset![AppContext => search_docs]
-        .with_context(context);
+    let toolset: ToolSet<AppContext> = toolset![AppContext => search_docs].with_context(context);
 
     let schemas = toolset.tools().expect("schemas");
 
@@ -217,7 +234,15 @@ fn test_tool_schemas_exclude_context_parameter() {
         .expect("search_docs schema");
 
     // Verify that the #[context] parameter is NOT in the schema
-    let properties = search_schema.parameters["properties"].as_object().expect("properties");
-    assert!(!properties.contains_key("db"), "Context parameter should not be in schema");
-    assert!(properties.contains_key("query"), "Regular parameter should be in schema");
+    let properties = search_schema.parameters["properties"]
+        .as_object()
+        .expect("properties");
+    assert!(
+        !properties.contains_key("db"),
+        "Context parameter should not be in schema"
+    );
+    assert!(
+        properties.contains_key("query"),
+        "Regular parameter should be in schema"
+    );
 }

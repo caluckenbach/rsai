@@ -224,7 +224,10 @@ fn parse_parameters(
                             "only one Ctx<&T> parameter is allowed per tool function",
                         ));
                     }
-                    context_param = Some(ContextParam { name, inner_ty: ref_inner });
+                    context_param = Some(ContextParam {
+                        name,
+                        inner_ty: ref_inner,
+                    });
                     continue; // Don't add to regular params
                 }
 
