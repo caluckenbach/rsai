@@ -1,6 +1,18 @@
-use std::{env, marker::PhantomData};
+use std::{env, marker::PhantomData, sync::Arc};
 
 use tracing::{debug, instrument};
+
+/// Type alias for inspection callbacks that receive raw JSON payloads.
+pub type Inspector = Arc<dyn Fn(&serde_json::Value) + Send + Sync>;
+
+/// Configuration for request/response inspection hooks.
+#[derive(Clone, Default)]
+pub struct InspectorConfig {
+    /// Called with the raw JSON request body before each HTTP request.
+    pub request_inspector: Option<Inspector>,
+    /// Called with the raw JSON response body after each HTTP response.
+    pub response_inspector: Option<Inspector>,
+}
 
 use crate::{
     provider::{Provider, gemini, openai, openrouter},
@@ -49,6 +61,9 @@ struct BuilderFields {
     max_tokens: Option<u32>,
     temperature: Option<f32>,
     top_p: Option<f32>,
+
+    // Inspection hooks
+    inspector_config: Option<InspectorConfig>,
 }
 
 impl BuilderFields {
@@ -65,6 +80,7 @@ impl BuilderFields {
             temperature: None,
             top_p: None,
             http_client_config: None,
+            inspector_config: None,
         }
     }
 
@@ -116,6 +132,10 @@ impl<State> LlmBuilder<State> {
 
     pub(crate) fn get_http_config(&self) -> Option<&HttpClientConfig> {
         self.fields.http_client_config.as_ref()
+    }
+
+    pub(crate) fn get_inspector_config(&self) -> Option<&InspectorConfig> {
+        self.fields.inspector_config.as_ref()
     }
 }
 
@@ -201,6 +221,77 @@ impl<State: private::Completable> LlmBuilder<State> {
     /// An alternative to temperature; use one or the other, not both.
     pub fn top_p(mut self, top_p: f32) -> Self {
         self.fields.top_p = Some(top_p);
+        self
+    }
+
+    /// Set a callback to inspect raw JSON requests before they are sent.
+    ///
+    /// The callback receives a reference to the serialized request body as JSON.
+    /// This fires on ALL requests, including each iteration of tool-calling loops.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use rsai::{llm, ApiKey, Provider, Message, ChatRole, TextResponse};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let response = llm::with(Provider::OpenAI)
+    ///     .api_key(ApiKey::Default)?
+    ///     .model("gpt-4o-mini")
+    ///     .messages(vec![Message {
+    ///         role: ChatRole::User,
+    ///         content: "Hello".to_string(),
+    ///     }])
+    ///     .inspect_request(|req| {
+    ///         println!("Request: {}", serde_json::to_string_pretty(req).unwrap());
+    ///     })
+    ///     .complete::<TextResponse>()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn inspect_request<F>(mut self, inspector: F) -> Self
+    where
+        F: Fn(&serde_json::Value) + Send + Sync + 'static,
+    {
+        let mut config = self.fields.inspector_config.take().unwrap_or_default();
+        config.request_inspector = Some(Arc::new(inspector));
+        self.fields.inspector_config = Some(config);
+        self
+    }
+
+    /// Set a callback to inspect raw JSON responses after they are received.
+    ///
+    /// The callback receives a reference to the parsed response body as JSON.
+    /// This fires on ALL responses, including each iteration of tool-calling loops
+    /// and both success and error responses.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use rsai::{llm, ApiKey, Provider, Message, ChatRole, TextResponse};
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let response = llm::with(Provider::OpenAI)
+    ///     .api_key(ApiKey::Default)?
+    ///     .model("gpt-4o-mini")
+    ///     .messages(vec![Message {
+    ///         role: ChatRole::User,
+    ///         content: "Hello".to_string(),
+    ///     }])
+    ///     .inspect_response(|res| {
+    ///         println!("Response: {}", serde_json::to_string_pretty(res).unwrap());
+    ///     })
+    ///     .complete::<TextResponse>()
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn inspect_response<F>(mut self, inspector: F) -> Self
+    where
+        F: Fn(&serde_json::Value) + Send + Sync + 'static,
+    {
+        let mut config = self.fields.inspector_config.take().unwrap_or_default();
+        config.response_inspector = Some(Arc::new(inspector));
+        self.fields.inspector_config = Some(config);
         self
     }
 
