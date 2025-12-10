@@ -15,8 +15,8 @@ use crate::provider::constants::openrouter;
 use crate::responses::{HttpClientConfig, ResponsesClient, ResponsesProviderConfig};
 
 use crate::core::{
-    LlmBuilder, LlmError, LlmProvider, StructuredRequest, ToolCallingConfig, ToolCallingGuard,
-    ToolRegistry,
+    InspectorConfig, LlmBuilder, LlmError, LlmProvider, StructuredRequest, ToolCallingConfig,
+    ToolCallingGuard, ToolRegistry,
 };
 use async_trait::async_trait;
 
@@ -29,6 +29,8 @@ pub struct OpenRouterConfig {
     pub http_config: HttpClientConfig,
     /// Configuration for tool calling limits
     pub tool_calling_config: Option<ToolCallingConfig>,
+    /// Configuration for request/response inspection
+    pub inspector_config: Option<InspectorConfig>,
 }
 
 impl OpenRouterConfig {
@@ -40,6 +42,7 @@ impl OpenRouterConfig {
             x_title: None,
             tool_calling_config: Some(ToolCallingConfig::default()),
             http_config: HttpClientConfig::default(),
+            inspector_config: None,
         }
     }
 
@@ -50,6 +53,11 @@ impl OpenRouterConfig {
 
     pub fn with_http_config(mut self, config: HttpClientConfig) -> Self {
         self.http_config = config;
+        self
+    }
+
+    pub fn with_inspector_config(mut self, config: InspectorConfig) -> Self {
+        self.inspector_config = Some(config);
         self
     }
 
@@ -114,6 +122,10 @@ impl ResponsesProviderConfig for OpenRouterConfig {
     fn http_config(&self) -> HttpClientConfig {
         self.http_config.clone()
     }
+
+    fn inspector_config(&self) -> Option<&InspectorConfig> {
+        self.inspector_config.as_ref()
+    }
 }
 
 impl OpenRouterConfig {
@@ -141,6 +153,7 @@ impl OpenRouterClient {
         let http_referer = self.responses_client.config.http_referer.clone();
         let x_title = self.responses_client.config.x_title.clone();
         let http_config = self.responses_client.config.http_config.clone();
+        let inspector_config = self.responses_client.config.inspector_config.clone();
 
         let new_config = OpenRouterConfig {
             api_key: current_api_key.clone(),
@@ -149,6 +162,7 @@ impl OpenRouterClient {
             x_title,
             tool_calling_config: self.responses_client.config.tool_calling_config.clone(),
             http_config,
+            inspector_config,
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -170,6 +184,7 @@ impl OpenRouterClient {
         let http_referer = self.responses_client.config.http_referer.clone();
         let x_title = self.responses_client.config.x_title.clone();
         let http_config = self.responses_client.config.http_config.clone();
+        let inspector_config = self.responses_client.config.inspector_config.clone();
 
         let new_config = OpenRouterConfig {
             api_key: current_api_key.clone(),
@@ -178,6 +193,7 @@ impl OpenRouterClient {
             x_title,
             tool_calling_config: Some(config),
             http_config,
+            inspector_config,
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -192,6 +208,7 @@ impl OpenRouterClient {
             x_title: current_config.x_title.clone(),
             tool_calling_config: current_config.tool_calling_config.clone(),
             http_config: config,
+            inspector_config: current_config.inspector_config.clone(),
         };
         self.responses_client = ResponsesClient::new(new_config)?;
         Ok(self)
@@ -254,8 +271,12 @@ pub fn create_openrouter_client_from_builder<State, Ctx>(
 
     let mut config = OpenRouterConfig::new(api_key);
 
-    if let Some(http_config) = &builder.get_http_config() {
-        config = config.with_http_config((*http_config).clone());
+    if let Some(http_config) = builder.get_http_config() {
+        config = config.with_http_config(http_config.clone());
+    }
+
+    if let Some(inspector_config) = builder.get_inspector_config() {
+        config = config.with_inspector_config(inspector_config.clone());
     }
 
     let client = ResponsesClient::new(config)?;

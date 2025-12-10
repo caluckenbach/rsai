@@ -6,8 +6,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     core::{
-        FunctionCallData, HttpClient, HttpClientConfig, LlmError, ProviderResponse,
-        StructuredRequest, ToolCall, ToolCallingGuard, ToolRegistry,
+        FunctionCallData, HttpClient, HttpClientConfig, InspectorConfig, LlmError,
+        ProviderResponse, StructuredRequest, ToolCall, ToolCallingGuard, ToolRegistry,
     },
     responses::Format,
 };
@@ -81,6 +81,11 @@ pub trait CompletionProviderConfig {
     fn user_agent(&self) -> String {
         format!("rsai/{}", env!("CARGO_PKG_VERSION"))
     }
+
+    /// Get the inspector configuration for request/response logging.
+    fn inspector_config(&self) -> Option<&InspectorConfig> {
+        None
+    }
 }
 
 /// Generic client for completion-style providers.
@@ -94,8 +99,9 @@ impl<P: CompletionProviderConfig> CompletionClient<P> {
     pub fn new(config: P) -> Result<Self, LlmError> {
         let http_config = config.http_config();
         let user_agent = config.user_agent();
+        let inspector_config = config.inspector_config().cloned();
 
-        let http = HttpClient::new(http_config, Some(&user_agent))?;
+        let http = HttpClient::new(http_config, Some(&user_agent), inspector_config)?;
 
         Ok(Self { config, http })
     }

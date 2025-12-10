@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::{Serialize, de::DeserializeOwned};
 use tracing::{debug, warn};
 
+use super::builder::InspectorConfig;
 use super::error::LlmError;
 
 /// Configuration for HTTP client resilience
@@ -33,11 +34,16 @@ impl Default for HttpClientConfig {
 pub struct HttpClient {
     client: reqwest::Client,
     config: HttpClientConfig,
+    inspector_config: Option<InspectorConfig>,
 }
 
 impl HttpClient {
     /// Create a new HTTP client with the given configuration.
-    pub fn new(config: HttpClientConfig, user_agent: Option<&str>) -> Result<Self, LlmError> {
+    pub fn new(
+        config: HttpClientConfig,
+        user_agent: Option<&str>,
+        inspector_config: Option<InspectorConfig>,
+    ) -> Result<Self, LlmError> {
         let default_ua = format!("rsai/{}", env!("CARGO_PKG_VERSION"));
         let ua = user_agent.unwrap_or(&default_ua);
 
@@ -49,7 +55,11 @@ impl HttpClient {
                 LlmError::ProviderConfiguration(format!("Failed to build reqwest client: {e}"))
             })?;
 
-        Ok(Self { client, config })
+        Ok(Self {
+            client,
+            config,
+            inspector_config,
+        })
     }
 
     /// Make a POST request with JSON body and retry logic.
@@ -72,11 +82,24 @@ impl HttpClient {
         Req: Serialize,
         Res: DeserializeOwned,
     {
+        // Serialize request to Value for inspection
+        let body_value = serde_json::to_value(body).map_err(|e| LlmError::Parse {
+            message: "Failed to serialize request for inspection".to_string(),
+            source: Box::new(e),
+        })?;
+
+        // Call request inspector
+        if let Some(ref config) = self.inspector_config
+            && let Some(ref inspector) = config.request_inspector
+        {
+            inspector(&body_value);
+        }
+
         let mut last_error: Option<LlmError> = None;
 
         for attempt in 0..=self.config.max_retries {
             // Build request (must be rebuilt each attempt since .send() consumes it)
-            let mut req_builder = self.client.post(url).json(body);
+            let mut req_builder = self.client.post(url).json(&body_value);
 
             // Add headers
             for (name, value) in headers {
@@ -101,9 +124,32 @@ impl HttpClient {
                     // Success
                     if status.is_success() {
                         debug!(status = %status, "HTTP request successful");
-                        return res.json().await.map_err(|e| LlmError::Parse {
-                            message: "Failed to parse API response".to_string(),
+
+                        // Parse response to text first, then to Value for inspection
+                        let response_text = res.text().await.map_err(|e| LlmError::Parse {
+                            message: "Failed to read response body".to_string(),
                             source: Box::new(e),
+                        })?;
+
+                        let response_value: serde_json::Value =
+                            serde_json::from_str(&response_text).map_err(|e| LlmError::Parse {
+                                message: "Failed to parse response as JSON".to_string(),
+                                source: Box::new(e),
+                            })?;
+
+                        // Call response inspector
+                        if let Some(ref config) = self.inspector_config
+                            && let Some(ref inspector) = config.response_inspector
+                        {
+                            inspector(&response_value);
+                        }
+
+                        // Deserialize to target type
+                        return serde_json::from_value(response_value).map_err(|e| {
+                            LlmError::Parse {
+                                message: "Failed to parse API response".to_string(),
+                                source: Box::new(e),
+                            }
                         });
                     }
 
@@ -115,6 +161,20 @@ impl HttpClient {
                         .text()
                         .await
                         .unwrap_or_else(|_| "Unknown error".to_string());
+
+                    // Call response inspector for error responses
+                    if let Some(ref config) = self.inspector_config
+                        && let Some(ref inspector) = config.response_inspector
+                    {
+                        // Try to parse error as JSON, otherwise wrap in object
+                        let error_value = serde_json::from_str(&error_text).unwrap_or_else(|_| {
+                            serde_json::json!({
+                                "error": error_text,
+                                "status_code": status.as_u16()
+                            })
+                        });
+                        inspector(&error_value);
+                    }
 
                     if !is_retryable {
                         // Fatal errors - don't retry
