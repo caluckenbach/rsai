@@ -1,6 +1,6 @@
 [package]
 name = "rsai-macros"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Constantin Luckenbach <cluckenbach@protonmail.com>"]
 edition = "2024"
 description = "Macros for the rsai crate providing structured AI generation capabilities"

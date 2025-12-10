@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "rsai"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Constantin Luckenbach <cluckenbach@protonmail.com>"]
 edition = "2024"
 description = "Predictable development for unpredictable Gen-AI models. Let the compiler handle the chaos."
@@ -21,7 +21,7 @@ serde = { version = "1.0.218", features = ["derive"] }
 schemars = "1.0.4"
 
 [dependencies]
-rsai-macros = { path = "macros", version = "0.1.0-pre" }
+rsai-macros = { path = "macros", version = "0.2.0" }
 async-trait = "0.1.87"
 bytes = "1.10.1"
 futures = "0.3.31"
