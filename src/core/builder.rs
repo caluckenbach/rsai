@@ -104,6 +104,7 @@ impl<Ctx> BuilderFields<Ctx> {
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             top_p: self.top_p,
+            inspector_config: self.inspector_config,
         }
     }
 
