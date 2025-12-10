@@ -11,9 +11,9 @@ use crate::completions::{
     CompletionClient, CompletionProviderConfig, CompletionRequestBuilder, ConversationItem,
 };
 use crate::core::{
-    FunctionCallData, HttpClientConfig, LanguageModelUsage, LlmBuilder, LlmError, LlmProvider,
-    ProviderResponse, ResponseContent, StructuredRequest, ToolCallingConfig, ToolCallingGuard,
-    ToolRegistry,
+    FunctionCallData, HttpClientConfig, InspectorConfig, LanguageModelUsage, LlmBuilder, LlmError,
+    LlmProvider, ProviderResponse, ResponseContent, StructuredRequest, ToolCallingConfig,
+    ToolCallingGuard, ToolRegistry,
 };
 use crate::provider::constants::gemini;
 use crate::responses::{Format, request::FormatType};
@@ -191,6 +191,8 @@ pub struct GeminiConfig {
     pub base_url: String,
     pub tool_calling_config: Option<ToolCallingConfig>,
     pub http_config: HttpClientConfig,
+    /// Configuration for request/response inspection
+    pub inspector_config: Option<InspectorConfig>,
 }
 
 impl GeminiConfig {
@@ -200,6 +202,7 @@ impl GeminiConfig {
             base_url: gemini::API_BASE.to_string(),
             tool_calling_config: Some(ToolCallingConfig::default()),
             http_config: HttpClientConfig::default(),
+            inspector_config: None,
         }
     }
 
@@ -215,6 +218,11 @@ impl GeminiConfig {
 
     pub fn with_http_config(mut self, config: HttpClientConfig) -> Self {
         self.http_config = config;
+        self
+    }
+
+    pub fn with_inspector_config(mut self, config: InspectorConfig) -> Self {
+        self.inspector_config = Some(config);
         self
     }
 
@@ -238,6 +246,10 @@ impl CompletionProviderConfig for GeminiConfig {
 
     fn http_config(&self) -> HttpClientConfig {
         self.http_config.clone()
+    }
+
+    fn inspector_config(&self) -> Option<&InspectorConfig> {
+        self.inspector_config.as_ref()
     }
 }
 
@@ -609,12 +621,14 @@ impl GeminiClient {
             base_url: base_url.clone(),
             tool_calling_config: self.config.tool_calling_config.clone(),
             http_config: self.config.http_config.clone(),
+            inspector_config: self.config.inspector_config.clone(),
         };
         self.config = GeminiConfig {
             api_key: self.config.api_key.clone(),
             base_url,
             tool_calling_config: self.config.tool_calling_config.clone(),
             http_config: self.config.http_config.clone(),
+            inspector_config: self.config.inspector_config.clone(),
         };
         self.completion_client = CompletionClient::new(new_config)?;
         Ok(self)
@@ -629,6 +643,7 @@ impl GeminiClient {
             base_url: self.config.base_url.clone(),
             tool_calling_config: Some(tool_config.clone()),
             http_config: self.config.http_config.clone(),
+            inspector_config: self.config.inspector_config.clone(),
         };
         self.config.tool_calling_config = Some(tool_config);
         self.completion_client = CompletionClient::new(new_config)?;
@@ -641,8 +656,25 @@ impl GeminiClient {
             base_url: self.config.base_url.clone(),
             tool_calling_config: self.config.tool_calling_config.clone(),
             http_config: http_config.clone(),
+            inspector_config: self.config.inspector_config.clone(),
         };
         self.config.http_config = http_config;
+        self.completion_client = CompletionClient::new(new_config)?;
+        Ok(self)
+    }
+
+    pub fn with_inspector_config(
+        mut self,
+        inspector_config: InspectorConfig,
+    ) -> Result<Self, LlmError> {
+        let new_config = GeminiConfig {
+            api_key: self.config.api_key.clone(),
+            base_url: self.config.base_url.clone(),
+            tool_calling_config: self.config.tool_calling_config.clone(),
+            http_config: self.config.http_config.clone(),
+            inspector_config: Some(inspector_config.clone()),
+        };
+        self.config.inspector_config = Some(inspector_config);
         self.completion_client = CompletionClient::new(new_config)?;
         Ok(self)
     }
@@ -743,6 +775,10 @@ pub fn create_gemini_client_from_builder<State>(
 
     if let Some(http_config) = builder.get_http_config() {
         client = client.with_http_config(http_config.clone())?;
+    }
+
+    if let Some(inspector_config) = builder.get_inspector_config() {
+        client = client.with_inspector_config(inspector_config.clone())?;
     }
 
     Ok(client)
