@@ -67,7 +67,7 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         let http_config = config.http_config();
         let user_agent = config.user_agent();
 
-        let http = HttpClient::new(http_config, Some(&user_agent))?;
+        let http = HttpClient::new(http_config, Some(&user_agent), None)?;
 
         Ok(Self { config, http })
     }
