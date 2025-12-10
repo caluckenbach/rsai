@@ -533,13 +533,15 @@ mod tests {
             .max_tokens(100);
 
         assert!(builder.fields.inspector_config.is_some());
-        assert!(builder
-            .fields
-            .inspector_config
-            .as_ref()
-            .unwrap()
-            .request_inspector
-            .is_some());
+        assert!(
+            builder
+                .fields
+                .inspector_config
+                .as_ref()
+                .unwrap()
+                .request_inspector
+                .is_some()
+        );
     }
 
     #[test]
@@ -556,13 +558,15 @@ mod tests {
             .temperature(0.5);
 
         assert!(builder.fields.inspector_config.is_some());
-        assert!(builder
-            .fields
-            .inspector_config
-            .as_ref()
-            .unwrap()
-            .response_inspector
-            .is_some());
+        assert!(
+            builder
+                .fields
+                .inspector_config
+                .as_ref()
+                .unwrap()
+                .response_inspector
+                .is_some()
+        );
     }
 
     #[test]

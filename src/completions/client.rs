@@ -6,8 +6,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
     core::{
-        FunctionCallData, HttpClient, HttpClientConfig, InspectorConfig, LlmError, ProviderResponse,
-        StructuredRequest, ToolCall, ToolCallingGuard, ToolRegistry,
+        FunctionCallData, HttpClient, HttpClientConfig, InspectorConfig, LlmError,
+        ProviderResponse, StructuredRequest, ToolCall, ToolCallingGuard, ToolRegistry,
     },
     responses::Format,
 };

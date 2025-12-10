@@ -145,9 +145,11 @@ impl HttpClient {
                         }
 
                         // Deserialize to target type
-                        return serde_json::from_value(response_value).map_err(|e| LlmError::Parse {
-                            message: "Failed to parse API response".to_string(),
-                            source: Box::new(e),
+                        return serde_json::from_value(response_value).map_err(|e| {
+                            LlmError::Parse {
+                                message: "Failed to parse API response".to_string(),
+                                source: Box::new(e),
+                            }
                         });
                     }
 
