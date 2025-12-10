@@ -57,6 +57,10 @@ name = "http-config"
 path = "examples/http_config.rs"
 
 [[example]]
+name = "inspector"
+path = "examples/inspector.rs"
+
+[[example]]
 name = "openrouter"
 path = "examples/openrouter.rs"
 
