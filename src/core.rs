@@ -17,5 +17,5 @@ pub use types::{
     BoxFuture, ChatRole, ConversationMessage, FunctionCallData, GenerationConfig,
     LanguageModelUsage, Message, ProviderResponse, ResponseContent, ResponseMetadata,
     StructuredResponse, TextResponse, Tool, ToolCall, ToolCallResult, ToolChoice, ToolConfig,
-    ToolRegistry, ToolSet,
+    ToolRegistry, ToolSet, ToolSetBuilder,
 };

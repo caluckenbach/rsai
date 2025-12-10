@@ -1,16 +1,33 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use syn::{Ident, Result, Token, parse::Parse, parse::ParseStream};
+use syn::{Ident, Result, Token, Type, parse::Parse, parse::ParseStream};
 
-/// Parses a comma-separated list of identifiers for the tools! macro
+/// Parses a toolset definition with optional context type.
+/// Syntax:
+/// - `toolset![tool1, tool2]` - context-free toolset
+/// - `toolset![ContextType => tool1, tool2]` - toolset with context type
 struct ToolsList {
+    context_type: Option<Type>,
     tools: Vec<Ident>,
 }
 
 impl Parse for ToolsList {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut tools = Vec::new();
+        // Try to parse "Type =>" prefix for context-aware toolsets
+        let context_type = if input.peek2(Token![=>]) || (input.peek(syn::Ident) && {
+            // Look ahead to check if it's a type followed by =>
+            let fork = input.fork();
+            fork.parse::<Type>().is_ok() && fork.peek(Token![=>])
+        }) {
+            let ty = input.parse::<Type>()?;
+            input.parse::<Token![=>]>()?;
+            Some(ty)
+        } else {
+            None
+        };
 
+        // Parse comma-separated tool names
+        let mut tools = Vec::new();
         while !input.is_empty() {
             tools.push(input.parse::<Ident>()?);
 
@@ -21,8 +38,21 @@ impl Parse for ToolsList {
             }
         }
 
-        Ok(ToolsList { tools })
+        Ok(ToolsList { context_type, tools })
     }
+}
+
+/// Convert a snake_case function name to PascalCase struct name
+fn to_pascal_case(name: &str) -> String {
+    name.split('_')
+        .map(|s| {
+            let mut c = s.chars();
+            match c.next() {
+                None => String::new(),
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+            }
+        })
+        .collect()
 }
 
 pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
@@ -31,7 +61,7 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
     if tools_list.tools.is_empty() {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
-            "tools! macro requires at least one tool function",
+            "toolset! macro requires at least one tool function",
         ));
     }
 
@@ -40,36 +70,39 @@ pub fn tools_impl(input: TokenStream) -> Result<TokenStream> {
         .tools
         .iter()
         .map(|tool_name| {
-            quote::format_ident!(
-                "{}Tool",
-                tool_name
-                    .to_string()
-                    .split('_')
-                    .map(|s| {
-                        let mut c = s.chars();
-                        match c.next() {
-                            None => String::new(),
-                            Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-                        }
-                    })
-                    .collect::<String>()
-            )
+            quote::format_ident!("{}Tool", to_pascal_case(&tool_name.to_string()))
         })
         .collect();
 
-    // Generate the complete code with tools array and type-safe choice enum
-    let expanded = quote! {
-        {
-            use rsai::{Tool, ToolChoice, ToolFunction, ToolRegistry, ToolSet};
+    // Generate different code based on whether context is present
+    let expanded = if let Some(ctx_type) = tools_list.context_type {
+        // Context-aware toolset: returns ToolSetBuilder<Ctx> that requires .with_context(ctx)
+        quote! {
+            {
+                use rsai::{ToolFunction, ToolSetBuilder};
 
-            let registry = ToolRegistry::new();
-            #(
-                registry.register(std::sync::Arc::new(#wrapper_names))
-                .expect(&format!("Failed to register tool: {}", stringify!(#wrapper_names)));
-            )*
+                let mut builder = ToolSetBuilder::<#ctx_type>::new();
+                #(
+                    builder = builder.add_tool(std::sync::Arc::new(#wrapper_names));
+                )*
+                builder
+            }
+        }
+    } else {
+        // Context-free toolset: returns ToolSet<()> directly (backward compatible)
+        quote! {
+            {
+                use rsai::{Tool, ToolChoice, ToolFunction, ToolRegistry, ToolSet};
 
-            ToolSet {
-                registry,
+                let registry = ToolRegistry::new();
+                #(
+                    registry.register(std::sync::Arc::new(#wrapper_names))
+                    .expect(&format!("Failed to register tool: {}", stringify!(#wrapper_names)));
+                )*
+
+                ToolSet {
+                    registry,
+                }
             }
         }
     };
