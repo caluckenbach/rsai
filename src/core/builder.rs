@@ -29,8 +29,9 @@ mod private {
     impl Completable for ToolsSet {}
 }
 
-/// Builder fields that are shared across all states
-struct BuilderFields {
+/// Builder fields that are shared across all states.
+/// Generic over context type `Ctx` for tool execution.
+struct BuilderFields<Ctx = ()> {
     // Core configuration
     provider: Option<Provider>,
     api_key: Option<String>,
@@ -43,7 +44,7 @@ struct BuilderFields {
     // Tool configuration
     tool_choice: Option<ToolChoice>,
     parallel_tool_calls: Option<bool>,
-    tool_registry: Option<ToolRegistry>,
+    tool_registry: Option<ToolRegistry<Ctx>>,
 
     // Generation parameters
     max_tokens: Option<u32>,
@@ -51,7 +52,7 @@ struct BuilderFields {
     top_p: Option<f32>,
 }
 
-impl BuilderFields {
+impl BuilderFields<()> {
     fn new() -> Self {
         Self {
             provider: None,
@@ -65,6 +66,25 @@ impl BuilderFields {
             temperature: None,
             top_p: None,
             http_client_config: None,
+        }
+    }
+}
+
+impl<Ctx> BuilderFields<Ctx> {
+    /// Create a new BuilderFields with a different context type
+    fn with_context_type<NewCtx>(self, tool_registry: Option<ToolRegistry<NewCtx>>) -> BuilderFields<NewCtx> {
+        BuilderFields {
+            provider: self.provider,
+            api_key: self.api_key,
+            model: self.model,
+            http_client_config: self.http_client_config,
+            messages: self.messages,
+            tool_choice: self.tool_choice,
+            parallel_tool_calls: self.parallel_tool_calls,
+            tool_registry,
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            top_p: self.top_p,
         }
     }
 
@@ -96,14 +116,18 @@ impl BuilderFields {
 
 /// A type-safe builder for constructing LLM requests using the builder pattern.
 /// The builder enforces correct construction order through phantom types.
-pub struct LlmBuilder<State> {
-    fields: BuilderFields,
+///
+/// Type parameters:
+/// - `State`: The current builder state (ProviderSet, ApiKeySet, MessagesSet, ToolsSet)
+/// - `Ctx`: The context type for tool execution (defaults to `()` for no context)
+pub struct LlmBuilder<State, Ctx = ()> {
+    fields: BuilderFields<Ctx>,
     _state: PhantomData<State>,
 }
 
-impl<State> LlmBuilder<State> {
+impl<State, Ctx> LlmBuilder<State, Ctx> {
     /// Transition to a new builder state while preserving all field values
-    fn transition_state<NewState>(self) -> LlmBuilder<NewState> {
+    fn transition_state<NewState>(self) -> LlmBuilder<NewState, Ctx> {
         LlmBuilder {
             fields: self.fields,
             _state: PhantomData,
@@ -127,10 +151,10 @@ pub enum ApiKey {
     Custom(String),
 }
 
-impl LlmBuilder<private::ProviderSet> {
+impl LlmBuilder<private::ProviderSet, ()> {
     /// Set the API key for the provider.
     /// Use `ApiKey::Default` to load from environment variables or `ApiKey::Custom` for a custom key.
-    pub fn api_key(mut self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet>, LlmError> {
+    pub fn api_key(mut self, api_key: ApiKey) -> Result<LlmBuilder<private::ApiKeySet, ()>, LlmError> {
         let key = match api_key {
             ApiKey::Default => {
                 let provider = self.fields.provider.ok_or(LlmError::Builder(
@@ -152,23 +176,23 @@ impl LlmBuilder<private::ProviderSet> {
     }
 }
 
-impl LlmBuilder<private::ApiKeySet> {
+impl LlmBuilder<private::ApiKeySet, ()> {
     /// Set the model to use for the LLM request.
-    pub fn model(mut self, model_id: &str) -> LlmBuilder<private::Configuring> {
+    pub fn model(mut self, model_id: &str) -> LlmBuilder<private::Configuring, ()> {
         self.fields.model = Some(model_id.to_string());
         self.transition_state()
     }
 }
 
-impl LlmBuilder<private::Configuring> {
+impl LlmBuilder<private::Configuring, ()> {
     /// Set the messages for the conversation.
-    pub fn messages(mut self, messages: Vec<Message>) -> LlmBuilder<private::MessagesSet> {
+    pub fn messages(mut self, messages: Vec<Message>) -> LlmBuilder<private::MessagesSet, ()> {
         self.fields.messages = Some(messages);
         self.transition_state()
     }
 }
 
-impl<State: private::Completable> LlmBuilder<State> {
+impl<State: private::Completable, Ctx: Send + Sync + 'static> LlmBuilder<State, Ctx> {
     /// Set a custom timeout for the HTTP request.
     /// This is a convenience method that modifies the HttpClientConfig.
     pub fn timeout(mut self, duration: std::time::Duration) -> Self {
@@ -303,7 +327,7 @@ impl<State: private::Completable> LlmBuilder<State> {
                 };
                 let client = openai::create_openai_client_from_builder(&self)?;
                 client
-                    .generate_completion::<T>(
+                    .generate_completion::<T, Ctx>(
                         req,
                         format.clone(),
                         self.fields.tool_registry.as_ref(),
@@ -332,7 +356,7 @@ impl<State: private::Completable> LlmBuilder<State> {
                 };
                 let client = openrouter::create_openrouter_client_from_builder(&self)?;
                 client
-                    .generate_completion::<T>(req, format, self.fields.tool_registry.as_ref())
+                    .generate_completion::<T, Ctx>(req, format, self.fields.tool_registry.as_ref())
                     .await
             }
             Provider::Gemini => {
@@ -357,26 +381,32 @@ impl<State: private::Completable> LlmBuilder<State> {
                 };
                 let client = gemini::create_gemini_client_from_builder(&self)?;
                 client
-                    .generate_completion::<T>(req, format, self.fields.tool_registry.as_ref())
+                    .generate_completion::<T, Ctx>(req, format, self.fields.tool_registry.as_ref())
                     .await
             }
         }
     }
 }
 
-impl LlmBuilder<private::MessagesSet> {
+impl LlmBuilder<private::MessagesSet, ()> {
     /// Set the tools for the LLM request with automatic execution support.
     /// This transitions to the ToolsSet state where tool_choice and parallel_tool_calls can be configured.
     ///
     /// By default parallel tool calling is enabled. This can be changed by calling `parallel_tool_calls` with `false`.
-    pub fn tools(mut self, toolset: super::types::ToolSet) -> LlmBuilder<private::ToolsSet> {
+    pub fn tools<NewCtx: Send + Sync + 'static>(
+        mut self,
+        toolset: super::types::ToolSet<NewCtx>,
+    ) -> LlmBuilder<private::ToolsSet, NewCtx> {
         self.fields.parallel_tool_calls = Some(true);
-        self.fields.tool_registry = Some(toolset.registry);
-        self.transition_state()
+        let new_fields = self.fields.with_context_type(Some(toolset.registry));
+        LlmBuilder {
+            fields: new_fields,
+            _state: PhantomData,
+        }
     }
 }
 
-impl LlmBuilder<private::ToolsSet> {
+impl<Ctx: Send + Sync + 'static> LlmBuilder<private::ToolsSet, Ctx> {
     pub fn tool_choice(mut self, choice: ToolChoice) -> Self {
         self.fields.tool_choice = Some(choice);
         self
@@ -407,7 +437,7 @@ pub mod llm {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn with(provider: Provider) -> LlmBuilder<private::ProviderSet> {
+    pub fn with(provider: Provider) -> LlmBuilder<private::ProviderSet, ()> {
         let mut fields = BuilderFields::new();
         fields.provider = Some(provider);
 

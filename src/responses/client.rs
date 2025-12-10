@@ -93,22 +93,23 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Handle the complete tool calling loop until a final response is received
-    pub async fn handle_tool_calling_loop<T>(
+    pub async fn handle_tool_calling_loop<T, Ctx>(
         &self,
         request: StructuredRequest,
-        tool_registry: &ToolRegistry,
+        tool_registry: &ToolRegistry<Ctx>,
         guard: &mut ToolCallingGuard,
         format: Format,
     ) -> Result<T::Output, LlmError>
     where
         T: CompletionTarget,
+        Ctx: Send + Sync + 'static,
     {
         let timeout_duration = guard.timeout;
 
         // Use tokio::time::timeout to add timeout protection
         match tokio::time::timeout(
             timeout_duration,
-            self.handle_tool_calling_loop_internal::<T>(request, tool_registry, guard, format),
+            self.handle_tool_calling_loop_internal::<T, Ctx>(request, tool_registry, guard, format),
         )
         .await
         {
@@ -130,15 +131,16 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
         ),
         err
     )]
-    async fn handle_tool_calling_loop_internal<T>(
+    async fn handle_tool_calling_loop_internal<T, Ctx>(
         &self,
         request: StructuredRequest,
-        tool_registry: &ToolRegistry,
+        tool_registry: &ToolRegistry<Ctx>,
         guard: &mut ToolCallingGuard,
         format: Format,
     ) -> Result<T::Output, LlmError>
     where
         T: CompletionTarget,
+        Ctx: Send + Sync + 'static,
     {
         let mut responses_input = convert_messages_to_responses_format(request.messages.clone())?;
         let is_parallel = request
@@ -209,13 +211,16 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Process function calls either in parallel or sequentially
-    pub async fn process_function_calls(
+    pub async fn process_function_calls<Ctx>(
         &self,
         function_calls: &[&FunctionToolCall],
         responses_input: &mut Vec<InputItem>,
-        tool_registry: &ToolRegistry,
+        tool_registry: &ToolRegistry<Ctx>,
         is_parallel: bool,
-    ) -> Result<(), LlmError> {
+    ) -> Result<(), LlmError>
+    where
+        Ctx: Send + Sync + 'static,
+    {
         if is_parallel && function_calls.len() > 1 {
             self.process_parallel_function_calls(function_calls, responses_input, tool_registry)
                 .await
@@ -226,12 +231,15 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Process function calls in parallel (all calls first, then all results)
-    pub async fn process_parallel_function_calls(
+    pub async fn process_parallel_function_calls<Ctx>(
         &self,
         function_calls: &[&FunctionToolCall],
         responses_input: &mut Vec<InputItem>,
-        tool_registry: &ToolRegistry,
-    ) -> Result<(), LlmError> {
+        tool_registry: &ToolRegistry<Ctx>,
+    ) -> Result<(), LlmError>
+    where
+        Ctx: Send + Sync + 'static,
+    {
         let mut pending_executions = Vec::new();
 
         // Add all function calls to input and prepare for execution
@@ -268,12 +276,15 @@ impl<P: ResponsesProviderConfig> ResponsesClient<P> {
     }
 
     /// Process function calls sequentially (call and result pairs)
-    pub async fn process_sequential_function_calls(
+    pub async fn process_sequential_function_calls<Ctx>(
         &self,
         function_calls: &[&FunctionToolCall],
         responses_input: &mut Vec<InputItem>,
-        tool_registry: &ToolRegistry,
-    ) -> Result<(), LlmError> {
+        tool_registry: &ToolRegistry<Ctx>,
+    ) -> Result<(), LlmError>
+    where
+        Ctx: Send + Sync + 'static,
+    {
         for function_call in function_calls {
             responses_input.push(InputItem::FunctionCall((*function_call).clone()));
 
@@ -802,7 +813,7 @@ mod tests {
         let format = create_format_for_type::<T>()?;
 
         client
-            .handle_tool_calling_loop::<T>(request, &tool_registry, &mut guard, format)
+            .handle_tool_calling_loop::<T, ()>(request, &tool_registry, &mut guard, format)
             .await
     }
 

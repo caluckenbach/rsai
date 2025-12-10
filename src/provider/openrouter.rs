@@ -200,14 +200,15 @@ impl OpenRouterClient {
 
 #[async_trait]
 impl LlmProvider for OpenRouterClient {
-    async fn generate_completion<T>(
+    async fn generate_completion<T, Ctx>(
         &self,
         request: StructuredRequest,
         format: crate::responses::Format,
-        tool_registry: Option<&ToolRegistry>,
+        tool_registry: Option<&ToolRegistry<Ctx>>,
     ) -> Result<T::Output, LlmError>
     where
         T: crate::CompletionTarget + Send,
+        Ctx: Send + Sync + 'static,
     {
         // If tools are present and we have a registry, handle automatic tool calling
         let has_tools = request
@@ -220,7 +221,7 @@ impl LlmProvider for OpenRouterClient {
             let mut guard = self.responses_client.config.get_tool_calling_guard();
             return self
                 .responses_client
-                .handle_tool_calling_loop::<T>(request, tool_registry, &mut guard, format)
+                .handle_tool_calling_loop::<T, Ctx>(request, tool_registry, &mut guard, format)
                 .await;
         }
 
@@ -243,8 +244,8 @@ impl LlmProvider for OpenRouterClient {
     }
 }
 
-pub fn create_openrouter_client_from_builder<State>(
-    builder: &LlmBuilder<State>,
+pub fn create_openrouter_client_from_builder<State, Ctx>(
+    builder: &LlmBuilder<State, Ctx>,
 ) -> Result<OpenRouterClient, LlmError> {
     let api_key = builder
         .get_api_key()

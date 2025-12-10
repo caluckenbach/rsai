@@ -14,7 +14,7 @@ pub use traits::{CompletionTarget, LlmProvider, ToolFunction};
 
 pub use types::StructuredRequest;
 pub use types::{
-    BoxFuture, ChatRole, ConversationMessage, FunctionCallData, GenerationConfig,
+    BoxFuture, ChatRole, ConversationMessage, Ctx, FunctionCallData, GenerationConfig,
     LanguageModelUsage, Message, ProviderResponse, ResponseContent, ResponseMetadata,
     StructuredResponse, TextResponse, Tool, ToolCall, ToolCallResult, ToolChoice, ToolConfig,
     ToolRegistry, ToolSet, ToolSetBuilder,

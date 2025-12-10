@@ -9,14 +9,15 @@ use super::{
 
 #[async_trait]
 pub trait LlmProvider {
-    async fn generate_completion<T>(
+    async fn generate_completion<T, Ctx>(
         &self,
         request: StructuredRequest,
         format: Format,
-        tool_registry: Option<&ToolRegistry>,
+        tool_registry: Option<&ToolRegistry<Ctx>>,
     ) -> Result<T::Output, LlmError>
     where
-        T: CompletionTarget + Send;
+        T: CompletionTarget + Send,
+        Ctx: Send + Sync + 'static;
 }
 
 pub trait ToolFunction<Ctx = ()>: Send + Sync {

@@ -116,19 +116,28 @@ impl<P: CompletionProviderConfig> CompletionClient<P> {
     }
 
     /// Handle the complete tool calling loop until a final response is received.
-    pub async fn handle_tool_calling_loop<B: CompletionRequestBuilder>(
+    pub async fn handle_tool_calling_loop<B: CompletionRequestBuilder, Ctx>(
         &self,
         builder: &B,
         request: StructuredRequest,
-        tool_registry: &ToolRegistry,
+        tool_registry: &ToolRegistry<Ctx>,
         guard: &mut ToolCallingGuard,
         format: Format,
-    ) -> Result<ProviderResponse, LlmError> {
+    ) -> Result<ProviderResponse, LlmError>
+    where
+        Ctx: Send + Sync + 'static,
+    {
         let timeout_duration = guard.timeout;
 
         match tokio::time::timeout(
             timeout_duration,
-            self.handle_tool_calling_loop_internal(builder, request, tool_registry, guard, format),
+            self.handle_tool_calling_loop_internal::<B, Ctx>(
+                builder,
+                request,
+                tool_registry,
+                guard,
+                format,
+            ),
         )
         .await
         {
@@ -140,14 +149,17 @@ impl<P: CompletionProviderConfig> CompletionClient<P> {
     }
 
     /// Internal implementation of the tool calling loop.
-    async fn handle_tool_calling_loop_internal<B: CompletionRequestBuilder>(
+    async fn handle_tool_calling_loop_internal<B: CompletionRequestBuilder, Ctx>(
         &self,
         builder: &B,
         request: StructuredRequest,
-        tool_registry: &ToolRegistry,
+        tool_registry: &ToolRegistry<Ctx>,
         guard: &mut ToolCallingGuard,
         format: Format,
-    ) -> Result<ProviderResponse, LlmError> {
+    ) -> Result<ProviderResponse, LlmError>
+    where
+        Ctx: Send + Sync + 'static,
+    {
         // Convert initial messages to conversation items
         let mut conversation = convert_messages_to_conversation(&request.messages)?;
         let is_parallel = request

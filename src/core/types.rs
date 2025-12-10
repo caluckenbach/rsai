@@ -7,9 +7,47 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;
+use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 use tracing::warn;
+
+/// Marker type for context/dependency injection in tools.
+///
+/// Use this type wrapper in tool function parameters to inject dependencies from the context.
+/// The macro will recognize `Ctx<&T>` parameters and extract them from the tool registry's context
+/// using `AsRef<T>`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use rsai::{tool, Ctx};
+///
+/// struct DatabasePool { /* ... */ }
+///
+/// #[tool]
+/// /// Search documents in the database
+/// /// query: The search query
+/// fn search_docs(db: Ctx<&DatabasePool>, query: String) -> Vec<String> {
+///     db.search(&query)
+/// }
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Ctx<T>(pub T);
+
+impl<T> Deref for Ctx<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> From<T> for Ctx<T> {
+    fn from(value: T) -> Self {
+        Ctx(value)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatRole {

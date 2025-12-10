@@ -170,20 +170,24 @@ struct Parameter {
     required: bool,
 }
 
-/// Check if a parameter has the #[context] attribute
-fn has_context_attr(attrs: &[Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("context"))
-}
-
-/// Extract the inner type from a reference type (e.g., `&DatabasePool` -> `DatabasePool`)
-fn extract_ref_inner_type(ty: &Type) -> Result<Type> {
-    match ty {
-        Type::Reference(type_ref) => Ok((*type_ref.elem).clone()),
-        _ => Err(syn::Error::new_spanned(
-            ty,
-            "context parameter must be a reference type (e.g., `#[context] ctx: &MyContext`)",
-        )),
+/// Check if a type is `Ctx<T>` and extract the inner type.
+/// Returns Some((inner_type, ref_inner_type)) if it's a Ctx wrapper, None otherwise.
+/// inner_type is the full type inside Ctx (e.g., `&DatabasePool`)
+/// ref_inner_type is the type without the reference (e.g., `DatabasePool`)
+fn extract_ctx_type(ty: &Type) -> Option<(Type, Type)> {
+    if let Type::Path(type_path) = ty
+        && let segments = &type_path.path.segments
+        && segments.len() == 1
+        && segments[0].ident == "Ctx"
+        && let syn::PathArguments::AngleBracketed(args) = &segments[0].arguments
+        && let Some(syn::GenericArgument::Type(inner_ty)) = args.args.first()
+        && let Type::Reference(type_ref) = inner_ty
+    {
+        // inner_ty is the type inside Ctx<>, which should be a reference like &DatabasePool
+        // ref_inner is the type without the reference (e.g., DatabasePool)
+        return Some((inner_ty.clone(), (*type_ref.elem).clone()));
     }
+    None
 }
 
 fn parse_parameters(
@@ -212,16 +216,15 @@ fn parse_parameters(
                     }
                 };
 
-                // Check if this is a context parameter
-                if has_context_attr(&pat_type.attrs) {
+                // Check if this is a context parameter (Ctx<&T> type)
+                if let Some((_full_inner, ref_inner)) = extract_ctx_type(&pat_type.ty) {
                     if context_param.is_some() {
                         return Err(syn::Error::new_spanned(
                             pat_type,
-                            "only one #[context] parameter is allowed per tool function",
+                            "only one Ctx<&T> parameter is allowed per tool function",
                         ));
                     }
-                    let inner_ty = extract_ref_inner_type(&pat_type.ty)?;
-                    context_param = Some(ContextParam { name, inner_ty });
+                    context_param = Some(ContextParam { name, inner_ty: ref_inner });
                     continue; // Don't add to regular params
                 }
 
@@ -436,19 +439,17 @@ fn generate_execute_impl(
         } else {
             quote! { #fn_name(#ctx_name, #(#param_names),*) }
         }
+    } else if is_async {
+        quote! { #fn_name(#(#param_names),*).await }
     } else {
-        if is_async {
-            quote! { #fn_name(#(#param_names),*).await }
-        } else {
-            quote! { #fn_name(#(#param_names),*) }
-        }
+        quote! { #fn_name(#(#param_names),*) }
     };
 
     // Generate context extraction if needed
     let context_extraction = if let Some(ctx) = context_param {
         let ctx_name = quote::format_ident!("{}", ctx.name);
         quote! {
-            let #ctx_name = __ctx.as_ref();
+            let #ctx_name = rsai::Ctx(__ctx.as_ref());
         }
     } else {
         quote! {}

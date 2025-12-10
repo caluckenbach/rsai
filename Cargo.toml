@@ -69,5 +69,9 @@ name = "text-generation"
 path = "examples/text_generation.rs"
 
 [[example]]
+name = "tool-context"
+path = "examples/tool_context.rs"
+
+[[example]]
 name = "tracing"
 path = "examples/tracing.rs"
