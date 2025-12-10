@@ -1,4 +1,5 @@
 use crate::core::{LlmError, traits::CompletionTarget, traits::ToolFunction};
+use std::marker::PhantomData;
 use crate::provider::Provider;
 use crate::responses::{self, request::Format};
 use schemars::JsonSchema;
@@ -154,14 +155,27 @@ pub struct FunctionCallData {
     pub arguments: Value,
 }
 
-pub struct ToolRegistry {
-    tools: Arc<RwLock<HashMap<String, Arc<dyn ToolFunction>>>>,
+pub struct ToolRegistry<Ctx = ()> {
+    tools: Arc<RwLock<HashMap<String, Arc<dyn ToolFunction<Ctx>>>>>,
+    context: Arc<Ctx>,
 }
 
-impl ToolRegistry {
+impl ToolRegistry<()> {
+    /// Create a new tool registry without context (for backward compatibility)
     pub fn new() -> Self {
         Self {
             tools: Arc::new(RwLock::new(HashMap::new())),
+            context: Arc::new(()),
+        }
+    }
+}
+
+impl<Ctx: Send + Sync + 'static> ToolRegistry<Ctx> {
+    /// Create a new tool registry with the given context
+    pub fn with_context(context: Ctx) -> Self {
+        Self {
+            tools: Arc::new(RwLock::new(HashMap::new())),
+            context: Arc::new(context),
         }
     }
 
@@ -179,23 +193,11 @@ impl ToolRegistry {
     /// - A tool with the same name is already registered
     /// - The registry's write lock is poisoned (indicates a panic in another thread)
     ///
-    /// # Examples
-    /// ```ignore
-    /// use std::sync::Arc;
-    /// use rsai::ToolRegistry;
-    ///
-    /// // Assuming you have a tool implementation
-    /// let registry = ToolRegistry::new();
-    /// // let tool: Arc<dyn rsai::ToolFunction> = Arc::new(your_tool);
-    /// // registry.register(tool)?;
-    /// # Ok::<(), rsai::LlmError>(())
-    /// ```
-    ///
     /// # Thread Safety
     /// This method is thread-safe. Multiple threads can register tools concurrently,
     /// but attempting to register the same tool name from multiple threads will
     /// result in only one success and the rest will return errors.
-    pub fn register(&self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
+    pub fn register(&self, tool: Arc<dyn ToolFunction<Ctx>>) -> Result<(), LlmError> {
         let schema = tool.schema();
         let schema_name = schema.name.clone();
 
@@ -215,7 +217,7 @@ impl ToolRegistry {
         Ok(())
     }
 
-    pub fn overwrite(&self, tool: Arc<dyn ToolFunction>) -> Result<(), LlmError> {
+    pub fn overwrite(&self, tool: Arc<dyn ToolFunction<Ctx>>) -> Result<(), LlmError> {
         let schema = tool.schema();
         let schema_name = schema.name.clone();
 
@@ -267,7 +269,7 @@ impl ToolRegistry {
         };
 
         let result = if let Some(tool) = tool {
-            tool.execute(tool_call.arguments.clone()).await
+            tool.execute(&self.context, tool_call.arguments.clone()).await
         } else {
             Err(LlmError::ToolNotFound(tool_call.name.clone()))
         };
@@ -280,7 +282,7 @@ impl ToolRegistry {
     }
 }
 
-impl Default for ToolRegistry {
+impl Default for ToolRegistry<()> {
     fn default() -> Self {
         Self::new()
     }
@@ -288,13 +290,51 @@ impl Default for ToolRegistry {
 
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-pub struct ToolSet {
-    pub registry: ToolRegistry,
+pub struct ToolSet<Ctx = ()> {
+    pub registry: ToolRegistry<Ctx>,
 }
 
-impl ToolSet {
+impl<Ctx: Send + Sync + 'static> ToolSet<Ctx> {
     pub fn tools(&self) -> Result<Vec<Tool>, LlmError> {
         self.registry.get_schemas()
+    }
+}
+
+/// Builder for creating a ToolSet with context.
+/// Created by the `toolset!` macro when a context type is specified.
+pub struct ToolSetBuilder<Ctx> {
+    tools: Vec<Arc<dyn ToolFunction<Ctx>>>,
+    _marker: PhantomData<Ctx>,
+}
+
+impl<Ctx: Send + Sync + 'static> ToolSetBuilder<Ctx> {
+    pub fn new() -> Self {
+        Self {
+            tools: Vec::new(),
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn add_tool(mut self, tool: Arc<dyn ToolFunction<Ctx>>) -> Self {
+        self.tools.push(tool);
+        self
+    }
+
+    /// Finalize the toolset with the given context.
+    pub fn with_context(self, context: Ctx) -> ToolSet<Ctx> {
+        let registry = ToolRegistry::with_context(context);
+        for tool in self.tools {
+            registry
+                .register(tool)
+                .expect("Failed to register tool in ToolSetBuilder");
+        }
+        ToolSet { registry }
+    }
+}
+
+impl<Ctx: Send + Sync + 'static> Default for ToolSetBuilder<Ctx> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -395,14 +435,12 @@ impl CompletionTarget for TextResponse {
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
-
     use super::*;
     use std::sync::Arc;
 
     struct ObjectTool;
-    #[async_trait]
-    impl ToolFunction for ObjectTool {
+
+    impl ToolFunction<()> for ObjectTool {
         fn schema(&self) -> Tool {
             Tool {
                 name: "object_tool".to_string(),
@@ -418,6 +456,7 @@ mod tests {
 
         fn execute<'a>(
             &'a self,
+            _ctx: &'a (),
             _params: serde_json::Value,
         ) -> BoxFuture<'a, Result<serde_json::Value, LlmError>> {
             Box::pin(async move {
@@ -435,7 +474,7 @@ mod tests {
         let registry = ToolRegistry::new();
         registry
             .register(Arc::new(ObjectTool))
-            .expect("Failed to regiter object_tool");
+            .expect("Failed to register object_tool");
 
         let tool_call = ToolCall {
             id: "test_Id".to_string(),
@@ -446,7 +485,7 @@ mod tests {
 
         let result = registry.execute(&tool_call).await.unwrap();
 
-        // Verify the result is still structured data an not just a string
+        // Verify the result is still structured data and not just a string
         assert!(result.is_object());
         assert_eq!(result["name"], "test");
         assert_eq!(result["value"], 42);

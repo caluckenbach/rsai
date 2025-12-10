@@ -21,17 +21,17 @@ async fn test_tool_b(value: f64) -> serde_json::Value {
     json!({ "result": "success_b" })
 }
 
-fn tool_a() -> Arc<dyn ToolFunction> {
+fn tool_a() -> Arc<dyn ToolFunction<()>> {
     Arc::new(TestToolATool)
 }
 
-fn tool_b() -> Arc<dyn ToolFunction> {
+fn tool_b() -> Arc<dyn ToolFunction<()>> {
     Arc::new(TestToolBTool)
 }
 
 struct AlternateToolA;
 
-impl ToolFunction for AlternateToolA {
+impl ToolFunction<()> for AlternateToolA {
     fn schema(&self) -> Tool {
         Tool {
             name: "test_tool_a".to_string(),
@@ -53,13 +53,14 @@ impl ToolFunction for AlternateToolA {
 
     fn execute<'a>(
         &'a self,
+        _ctx: &'a (),
         _params: serde_json::Value,
     ) -> BoxFuture<'a, Result<serde_json::Value, LlmError>> {
         Box::pin(async move { Ok(json!({ "result": "alternate_success" })) })
     }
 }
 
-fn alternate_tool_a() -> Arc<dyn ToolFunction> {
+fn alternate_tool_a() -> Arc<dyn ToolFunction<()>> {
     Arc::new(AlternateToolA)
 }
 

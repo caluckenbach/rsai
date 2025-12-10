@@ -19,10 +19,11 @@ pub trait LlmProvider {
         T: CompletionTarget + Send;
 }
 
-pub trait ToolFunction: Send + Sync {
+pub trait ToolFunction<Ctx = ()>: Send + Sync {
     fn schema(&self) -> Tool;
     fn execute<'a>(
         &'a self,
+        ctx: &'a Ctx,
         params: serde_json::Value,
     ) -> BoxFuture<'a, Result<serde_json::Value, LlmError>>;
 }

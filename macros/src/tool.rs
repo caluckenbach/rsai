@@ -2,6 +2,13 @@ use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{Attribute, FnArg, ItemFn, Pat, Result, Type};
 
+/// Information about a context parameter (marked with #[context])
+struct ContextParam {
+    name: String,
+    /// The inner type of the reference (e.g., for `&DatabasePool`, this is `DatabasePool`)
+    inner_ty: Type,
+}
+
 pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     let _ = attr; // Currently unused, could be used for tool configuration
 
@@ -12,13 +19,13 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     // Extract function description and parameter descriptions from doc comments
     let (description, param_descriptions) = extract_doc_comment_and_params(&input.attrs);
 
-    // Parse function parameters
-    let params = parse_parameters(&input.sig.inputs, &param_descriptions)?;
+    // Parse function parameters, separating context params from regular params
+    let (context_param, params) = parse_parameters(&input.sig.inputs, &param_descriptions)?;
 
-    // Validate that all docstring parameters exist as actual parameters
+    // Validate that all docstring parameters exist as actual parameters (skip context params)
     validate_parameter_descriptions(&params, &param_descriptions, &input.sig)?;
 
-    // Generate JSON schema for parameters
+    // Generate JSON schema for parameters (excludes context params)
     let schema = generate_parameter_schema(&params)?;
 
     // Generate the wrapper struct name
@@ -41,7 +48,59 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
     let is_async = input.sig.asyncness.is_some();
 
     // Generate the execution code
-    let execute_impl = generate_execute_impl(fn_name, &params, is_async)?;
+    let execute_impl = generate_execute_impl(fn_name, &context_param, &params, is_async)?;
+
+    // Generate different trait implementations based on whether there's a context param
+    let trait_impl = if let Some(ctx_param) = &context_param {
+        // Tool with context: impl<Ctx> ToolFunction<Ctx> for Tool where Ctx: AsRef<ContextType>
+        let ctx_inner_ty = &ctx_param.inner_ty;
+        quote! {
+            impl<__Ctx> rsai::ToolFunction<__Ctx> for #wrapper_name
+            where
+                __Ctx: AsRef<#ctx_inner_ty> + Send + Sync,
+            {
+                fn schema(&self) -> rsai::Tool {
+                    use rsai::Tool;
+                    Tool {
+                        name: #fn_name_str.to_string(),
+                        description: #description,
+                        parameters: #schema,
+                        strict: Some(true),
+                    }
+                }
+
+                fn execute<'a>(&'a self, __ctx: &'a __Ctx, params: ::serde_json::Value) -> rsai::BoxFuture<'a, Result<::serde_json::Value, rsai::LlmError>> {
+                    use rsai::{BoxFuture, LlmError};
+                    Box::pin(async move {
+                        #execute_impl
+                    })
+                }
+            }
+        }
+    } else {
+        // Tool without context: impl<Ctx> ToolFunction<Ctx> for Tool (context is ignored)
+        quote! {
+            impl<__Ctx: Send + Sync> rsai::ToolFunction<__Ctx> for #wrapper_name {
+                fn schema(&self) -> rsai::Tool {
+                    use rsai::Tool;
+                    Tool {
+                        name: #fn_name_str.to_string(),
+                        description: #description,
+                        parameters: #schema,
+                        strict: Some(true),
+                    }
+                }
+
+                fn execute<'a>(&'a self, __ctx: &'a __Ctx, params: ::serde_json::Value) -> rsai::BoxFuture<'a, Result<::serde_json::Value, rsai::LlmError>> {
+                    use rsai::{BoxFuture, LlmError};
+                    let _ = __ctx; // Unused for context-free tools
+                    Box::pin(async move {
+                        #execute_impl
+                    })
+                }
+            }
+        }
+    };
 
     // Generate the complete implementation
     let expanded = quote! {
@@ -50,24 +109,7 @@ pub fn tool_impl(attr: TokenStream, item: TokenStream) -> Result<TokenStream> {
         #[derive(Clone)]
         pub struct #wrapper_name;
 
-        impl rsai::ToolFunction for #wrapper_name {
-            fn schema(&self) -> rsai::Tool {
-                use rsai::Tool;
-                Tool {
-                    name: #fn_name_str.to_string(),
-                    description: #description,
-                    parameters: #schema,
-                    strict: Some(true),
-                }
-            }
-
-            fn execute<'a>(&'a self, params: ::serde_json::Value) -> rsai::BoxFuture<'a, Result<::serde_json::Value, rsai::LlmError>> {
-                use rsai::{BoxFuture, LlmError};
-                Box::pin(async move {
-                    #execute_impl
-                })
-            }
-        }
+        #trait_impl
     };
 
     Ok(expanded)
@@ -128,11 +170,28 @@ struct Parameter {
     required: bool,
 }
 
+/// Check if a parameter has the #[context] attribute
+fn has_context_attr(attrs: &[Attribute]) -> bool {
+    attrs.iter().any(|attr| attr.path().is_ident("context"))
+}
+
+/// Extract the inner type from a reference type (e.g., `&DatabasePool` -> `DatabasePool`)
+fn extract_ref_inner_type(ty: &Type) -> Result<Type> {
+    match ty {
+        Type::Reference(type_ref) => Ok((*type_ref.elem).clone()),
+        _ => Err(syn::Error::new_spanned(
+            ty,
+            "context parameter must be a reference type (e.g., `#[context] ctx: &MyContext`)",
+        )),
+    }
+}
+
 fn parse_parameters(
     inputs: &syn::punctuated::Punctuated<FnArg, syn::token::Comma>,
     param_descriptions: &std::collections::HashMap<String, String>,
-) -> Result<Vec<Parameter>> {
+) -> Result<(Option<ContextParam>, Vec<Parameter>)> {
     let mut params = Vec::new();
+    let mut context_param: Option<ContextParam> = None;
 
     for arg in inputs {
         match arg {
@@ -152,6 +211,19 @@ fn parse_parameters(
                         ));
                     }
                 };
+
+                // Check if this is a context parameter
+                if has_context_attr(&pat_type.attrs) {
+                    if context_param.is_some() {
+                        return Err(syn::Error::new_spanned(
+                            pat_type,
+                            "only one #[context] parameter is allowed per tool function",
+                        ));
+                    }
+                    let inner_ty = extract_ref_inner_type(&pat_type.ty)?;
+                    context_param = Some(ContextParam { name, inner_ty });
+                    continue; // Don't add to regular params
+                }
 
                 // Get parameter description from docstring parsing
                 let description = param_descriptions.get(&name).cloned();
@@ -191,7 +263,7 @@ fn parse_parameters(
         }
     }
 
-    Ok(params)
+    Ok((context_param, params))
 }
 
 fn validate_parameter_descriptions(
@@ -314,6 +386,7 @@ fn type_to_json_type(ty: &Type) -> Result<&'static str> {
 
 fn generate_execute_impl(
     fn_name: &syn::Ident,
+    context_param: &Option<ContextParam>,
     params: &[Parameter],
     is_async: bool,
 ) -> Result<TokenStream> {
@@ -348,15 +421,37 @@ fn generate_execute_impl(
         }
     });
 
+    // Build the function call arguments
+    // If there's a context param, it comes first: fn_name(ctx.as_ref(), param1, param2, ...)
+    // Otherwise just: fn_name(param1, param2, ...)
     let param_names: Vec<_> = params
         .iter()
         .map(|p| quote::format_ident!("{}", p.name))
         .collect();
 
-    let function_call = if is_async {
-        quote! { #fn_name(#(#param_names),*).await }
+    let function_call = if let Some(ctx) = context_param {
+        let ctx_name = quote::format_ident!("{}", ctx.name);
+        if is_async {
+            quote! { #fn_name(#ctx_name, #(#param_names),*).await }
+        } else {
+            quote! { #fn_name(#ctx_name, #(#param_names),*) }
+        }
     } else {
-        quote! { #fn_name(#(#param_names),*) }
+        if is_async {
+            quote! { #fn_name(#(#param_names),*).await }
+        } else {
+            quote! { #fn_name(#(#param_names),*) }
+        }
+    };
+
+    // Generate context extraction if needed
+    let context_extraction = if let Some(ctx) = context_param {
+        let ctx_name = quote::format_ident!("{}", ctx.name);
+        quote! {
+            let #ctx_name = __ctx.as_ref();
+        }
+    } else {
+        quote! {}
     };
 
     Ok(quote! {
@@ -366,6 +461,8 @@ fn generate_execute_impl(
                 message: "Parameters must be an object".to_string(),
                 source: None,
             })?;
+
+        #context_extraction
 
         #(#param_extractions)*
 
