@@ -682,14 +682,15 @@ impl GeminiClient {
 
 #[async_trait]
 impl LlmProvider for GeminiClient {
-    async fn generate_completion<T>(
+    async fn generate_completion<T, Ctx>(
         &self,
         request: StructuredRequest,
         format: Format,
-        tool_registry: Option<&ToolRegistry>,
+        tool_registry: Option<&ToolRegistry<Ctx>>,
     ) -> Result<T::Output, LlmError>
     where
         T: crate::CompletionTarget + Send,
+        Ctx: Send + Sync + 'static,
     {
         let builder = GeminiRequestBuilder;
 
@@ -704,7 +705,7 @@ impl LlmProvider for GeminiClient {
             let mut guard = self.config.get_tool_calling_guard();
             let provider_response = self
                 .completion_client
-                .handle_tool_calling_loop(
+                .handle_tool_calling_loop::<_, Ctx>(
                     &builder,
                     request,
                     tool_registry.unwrap(),
@@ -763,8 +764,8 @@ fn convert_messages_to_conversation(
 // Builder Integration
 // ============================================================================
 
-pub fn create_gemini_client_from_builder<State>(
-    builder: &LlmBuilder<State>,
+pub fn create_gemini_client_from_builder<State, Ctx>(
+    builder: &LlmBuilder<State, Ctx>,
 ) -> Result<GeminiClient, LlmError> {
     let api_key = builder
         .get_api_key()

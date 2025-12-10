@@ -57,8 +57,8 @@ mod provider;
 mod responses;
 
 // Core types
-pub use core::{ChatRole, ConversationMessage, Message};
-pub use core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet};
+pub use core::{ChatRole, ConversationMessage, Ctx, Message};
+pub use core::{Tool, ToolCall, ToolCallResult, ToolRegistry, ToolSet, ToolSetBuilder};
 pub use core::{ToolCallingConfig, ToolCallingGuard};
 
 // Configuration types

@@ -86,7 +86,7 @@ async fn sequential_tool_call_flow_appends_history() {
 
     let client = client_for(&server, None);
     let response = client
-        .generate_completion::<SumResponse>(
+        .generate_completion::<SumResponse, ()>(
             request,
             <SumResponse as CompletionTarget>::format().expect("format"),
             Some(&toolset.registry),
@@ -141,7 +141,7 @@ async fn parallel_tool_calls_submit_all_results_together() {
 
     let client = client_for(&server, None);
     let response = client
-        .generate_completion::<SumResponse>(
+        .generate_completion::<SumResponse, ()>(
             request,
             <SumResponse as CompletionTarget>::format().expect("format"),
             Some(&toolset.registry),
@@ -207,7 +207,7 @@ async fn guard_stops_iteration_after_max_limit() {
     let guard_config = ToolCallingConfig::new(1, timeout);
     let client = client_for(&server, Some(guard_config));
     let err = client
-        .generate_completion::<SumResponse>(
+        .generate_completion::<SumResponse, ()>(
             request,
             <SumResponse as CompletionTarget>::format().expect("format"),
             Some(&toolset.registry),
@@ -244,7 +244,7 @@ async fn tool_call_timeout_triggers_error() {
     let guard_config = ToolCallingConfig::new(3, Duration::from_millis(50));
     let client = client_for(&server, Some(guard_config.clone()));
     let err = client
-        .generate_completion::<SumResponse>(
+        .generate_completion::<SumResponse, ()>(
             request,
             <SumResponse as CompletionTarget>::format().expect("format"),
             Some(&toolset.registry),
