@@ -508,3 +508,90 @@ pub mod llm {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn test_inspect_request_is_chainable() {
+        let call_count = Arc::new(AtomicUsize::new(0));
+        let count_clone = call_count.clone();
+
+        let builder = llm::with(Provider::OpenAI)
+            .api_key(ApiKey::Custom("test".into()))
+            .unwrap()
+            .model("gpt-4o-mini")
+            .messages(vec![Message {
+                role: super::super::types::ChatRole::User,
+                content: "test".to_string(),
+            }])
+            .inspect_request(move |_| {
+                count_clone.fetch_add(1, Ordering::SeqCst);
+            })
+            .max_tokens(100);
+
+        assert!(builder.fields.inspector_config.is_some());
+        assert!(builder
+            .fields
+            .inspector_config
+            .as_ref()
+            .unwrap()
+            .request_inspector
+            .is_some());
+    }
+
+    #[test]
+    fn test_inspect_response_is_chainable() {
+        let builder = llm::with(Provider::OpenAI)
+            .api_key(ApiKey::Custom("test".into()))
+            .unwrap()
+            .model("gpt-4o-mini")
+            .messages(vec![Message {
+                role: super::super::types::ChatRole::User,
+                content: "test".to_string(),
+            }])
+            .inspect_response(|_| {})
+            .temperature(0.5);
+
+        assert!(builder.fields.inspector_config.is_some());
+        assert!(builder
+            .fields
+            .inspector_config
+            .as_ref()
+            .unwrap()
+            .response_inspector
+            .is_some());
+    }
+
+    #[test]
+    fn test_both_inspectors_can_be_set() {
+        let builder = llm::with(Provider::OpenAI)
+            .api_key(ApiKey::Custom("test".into()))
+            .unwrap()
+            .model("gpt-4o-mini")
+            .messages(vec![Message {
+                role: super::super::types::ChatRole::User,
+                content: "test".to_string(),
+            }])
+            .inspect_request(|_| {})
+            .inspect_response(|_| {});
+
+        let config = builder.fields.inspector_config.as_ref().unwrap();
+        assert!(config.request_inspector.is_some());
+        assert!(config.response_inspector.is_some());
+    }
+
+    #[test]
+    fn test_inspector_config_is_cloneable() {
+        let config = InspectorConfig {
+            request_inspector: Some(Arc::new(|_| {})),
+            response_inspector: Some(Arc::new(|_| {})),
+        };
+
+        let cloned = config.clone();
+        assert!(cloned.request_inspector.is_some());
+        assert!(cloned.response_inspector.is_some());
+    }
+}

@@ -89,10 +89,10 @@ impl HttpClient {
         })?;
 
         // Call request inspector
-        if let Some(ref config) = self.inspector_config {
-            if let Some(ref inspector) = config.request_inspector {
-                inspector(&body_value);
-            }
+        if let Some(ref config) = self.inspector_config
+            && let Some(ref inspector) = config.request_inspector
+        {
+            inspector(&body_value);
         }
 
         let mut last_error: Option<LlmError> = None;
@@ -138,10 +138,10 @@ impl HttpClient {
                             })?;
 
                         // Call response inspector
-                        if let Some(ref config) = self.inspector_config {
-                            if let Some(ref inspector) = config.response_inspector {
-                                inspector(&response_value);
-                            }
+                        if let Some(ref config) = self.inspector_config
+                            && let Some(ref inspector) = config.response_inspector
+                        {
+                            inspector(&response_value);
                         }
 
                         // Deserialize to target type
@@ -161,19 +161,17 @@ impl HttpClient {
                         .unwrap_or_else(|_| "Unknown error".to_string());
 
                     // Call response inspector for error responses
-                    if let Some(ref config) = self.inspector_config {
-                        if let Some(ref inspector) = config.response_inspector {
-                            // Try to parse error as JSON, otherwise wrap in object
-                            let error_value = serde_json::from_str(&error_text).unwrap_or_else(
-                                |_| {
-                                    serde_json::json!({
-                                        "error": error_text,
-                                        "status_code": status.as_u16()
-                                    })
-                                },
-                            );
-                            inspector(&error_value);
-                        }
+                    if let Some(ref config) = self.inspector_config
+                        && let Some(ref inspector) = config.response_inspector
+                    {
+                        // Try to parse error as JSON, otherwise wrap in object
+                        let error_value = serde_json::from_str(&error_text).unwrap_or_else(|_| {
+                            serde_json::json!({
+                                "error": error_text,
+                                "status_code": status.as_u16()
+                            })
+                        });
+                        inspector(&error_value);
                     }
 
                     if !is_retryable {
